@@ -1,0 +1,2 @@
+internal/webassets/dist/*
+!internal/webassets/dist/README.txt
