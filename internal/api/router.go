@@ -1,6 +1,7 @@
 package api
 
 import (
+	"io/fs"
 	"log/slog"
 	"net/http"
 
@@ -17,7 +18,7 @@ type AuthWiring struct {
 	LogoutHandler     http.HandlerFunc
 }
 
-func NewRouter(logger *slog.Logger, notes *repo.NoteRepo, comments *repo.CommentRepo, auth AuthWiring) http.Handler {
+func NewRouter(logger *slog.Logger, notes *repo.NoteRepo, comments *repo.CommentRepo, auth AuthWiring, assets fs.FS) http.Handler {
 	r := mux.NewRouter()
 	r.Use(metrics.Middleware)
 	r.HandleFunc("/healthz", HealthHandler).Methods(http.MethodGet)
@@ -44,6 +45,10 @@ func NewRouter(logger *slog.Logger, notes *repo.NoteRepo, comments *repo.Comment
 	api.HandleFunc("/notes/{noteId}/comments", commentsHandler.Create).Methods(http.MethodPost)
 	api.HandleFunc("/comments/{id}", commentsHandler.Update).Methods(http.MethodPut)
 	api.HandleFunc("/comments/{id}", commentsHandler.Delete).Methods(http.MethodDelete)
+
+	// Catch-all for the SPA — registered last so it never shadows the
+	// routes above; mux matches routes in registration order.
+	r.PathPrefix("/").Handler(NewSPAHandler(assets))
 
 	return r
 }

@@ -12,6 +12,7 @@ import (
 	"notebook/internal/db/migrations"
 	"notebook/internal/logging"
 	"notebook/internal/repo"
+	"notebook/internal/webassets"
 )
 
 func main() {
@@ -48,12 +49,18 @@ func main() {
 	flowCodec := auth.NewFlowCodec(cfg.Session.HashKey, cfg.Session.BlockKey)
 	sessionCodec := auth.NewSessionCodec(cfg.Session.HashKey, cfg.Session.BlockKey)
 
+	assets, err := webassets.FS()
+	if err != nil {
+		logger.Error("failed to load embedded frontend assets", slog.String("error", err.Error()))
+		return
+	}
+
 	router := api.NewRouter(logger, notes, comments, api.AuthWiring{
 		SessionMiddleware: auth.NewSessionMiddleware(sessionCodec, users),
 		LoginHandler:      auth.NewLoginHandler(provider, flowCodec),
 		CallbackHandler:   auth.NewCallbackHandler(provider, flowCodec, sessionCodec, users, cfg.OIDC.AdminClaim, cfg.OIDC.AdminClaimValue, "/"),
 		LogoutHandler:     auth.NewLogoutHandler(sessionCodec),
-	})
+	}, assets)
 
 	logger.Info("starting server", slog.String("addr", ":8080"))
 	if err := http.ListenAndServe(":8080", router); err != nil {

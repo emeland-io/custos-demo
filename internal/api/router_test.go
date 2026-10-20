@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"notebook/internal/metrics"
 )
@@ -18,7 +19,7 @@ func TestNewRouter_MetricsLabelByRouteTemplate_NotUnmatched(t *testing.T) {
 		LoginHandler:      func(w http.ResponseWriter, r *http.Request) {},
 		CallbackHandler:   func(w http.ResponseWriter, r *http.Request) {},
 		LogoutHandler:     func(w http.ResponseWriter, r *http.Request) {},
-	})
+	}, fstest.MapFS{"index.html": {Data: []byte("shell")}})
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
