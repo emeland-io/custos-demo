@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { apiFetch, ApiError } from './api'
+import { apiFetch, ApiError, api } from './api'
 
 function mockFetchOnce(body, init = {}) {
   global.fetch = vi.fn().mockResolvedValue(
@@ -44,5 +44,47 @@ describe('apiFetch', () => {
     const [, options] = global.fetch.mock.calls[0]
     expect(options.credentials).toBe('include')
     expect(options.headers['Content-Type']).toBe('application/json')
+  })
+
+  it('api.get calls apiFetch with GET method', async () => {
+    mockFetchOnce({ data: 'test' }, { status: 200 })
+    const result = await api.get('/api/notes')
+    const [, options] = global.fetch.mock.calls[0]
+    expect(options.method).toBeUndefined() // GET is default
+    expect(result).toEqual({ data: 'test' })
+  })
+
+  it('api.post calls apiFetch with POST method and stringified body', async () => {
+    mockFetchOnce({ id: 1 }, { status: 200 })
+    const body = { title: 'Test Note', content: 'Test' }
+    await api.post('/api/notes', body)
+    const [, options] = global.fetch.mock.calls[0]
+    expect(options.method).toBe('POST')
+    expect(options.body).toBe(JSON.stringify(body))
+  })
+
+  it('api.put calls apiFetch with PUT method and stringified body', async () => {
+    mockFetchOnce({ id: 1, title: 'Updated' }, { status: 200 })
+    const body = { title: 'Updated' }
+    await api.put('/api/notes/1', body)
+    const [, options] = global.fetch.mock.calls[0]
+    expect(options.method).toBe('PUT')
+    expect(options.body).toBe(JSON.stringify(body))
+  })
+
+  it('api.delete calls apiFetch with DELETE method', async () => {
+    mockFetchOnce(undefined, { status: 204 })
+    await api.delete('/api/notes/1')
+    const [, options] = global.fetch.mock.calls[0]
+    expect(options.method).toBe('DELETE')
+  })
+
+  it('throws ApiError with fallback message on non-ok response with non-JSON body', async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response('Internal Server Error', { status: 500 })
+    )
+    await expect(apiFetch('/api/notes')).rejects.toThrow(
+      'request failed with status 500'
+    )
   })
 })
