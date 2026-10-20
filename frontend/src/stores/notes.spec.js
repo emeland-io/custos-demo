@@ -57,4 +57,15 @@ describe('useNotesStore', () => {
     expect(api.post).toHaveBeenCalledWith('/api/notes', { title: 'New', content: 'Body' })
     expect(created.id).toBe(3)
   })
+
+  it('update puts the payload and returns the updated note', async () => {
+    api.put.mockResolvedValue({ id: 5, title: 'Updated', content: 'New body' })
+    const store = useNotesStore()
+
+    const updated = await store.update(5, { title: 'Updated', content: 'New body' })
+
+    expect(api.put).toHaveBeenCalledWith('/api/notes/5', { title: 'Updated', content: 'New body' })
+    expect(updated.id).toBe(5)
+    expect(updated.title).toBe('Updated')
+  })
 })

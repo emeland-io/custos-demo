@@ -36,4 +36,12 @@ describe('useAuthStore', () => {
     const store = useAuthStore()
     expect(store.canEdit(5)).toBe(false)
   })
+
+  it('canEdit is true for admin even if not the owner', async () => {
+    api.get.mockResolvedValue({ id: 10, email: 'admin@example.com', display_name: 'Admin', role: 'admin' })
+    const store = useAuthStore()
+    await store.load()
+
+    expect(store.canEdit(999)).toBe(true)
+  })
 })
