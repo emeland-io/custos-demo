@@ -30,8 +30,9 @@ func main() {
 	}
 
 	notes := repo.NewNoteRepo(pool)
+	comments := repo.NewCommentRepo(pool)
 
-	router := api.NewRouter(logger, notes)
+	router := api.NewRouter(logger, notes, comments)
 
 	logger.Info("starting server", slog.String("addr", ":8080"))
 	if err := http.ListenAndServe(":8080", router); err != nil {
