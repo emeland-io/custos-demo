@@ -8,6 +8,7 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"notebook/internal/metrics"
 	"notebook/internal/repo"
 )
 
@@ -63,6 +64,7 @@ func (h *NotesHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "failed to create note")
 		return
 	}
+	metrics.NotesCreatedTotal.Inc()
 
 	writeJSON(w, http.StatusCreated, noteResponse{
 		ID: note.ID, Title: note.Title, Content: note.Content, AuthorID: note.AuthorID,

@@ -6,12 +6,14 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"notebook/internal/metrics"
 	"notebook/internal/repo"
 )
 
-func NewRouter(logger *slog.Logger, notes *repo.NoteRepo, comments *repo.CommentRepo) *mux.Router {
+func NewRouter(logger *slog.Logger, notes *repo.NoteRepo, comments *repo.CommentRepo) http.Handler {
 	r := mux.NewRouter()
 	r.HandleFunc("/healthz", HealthHandler).Methods(http.MethodGet)
+	r.Handle("/metrics", metrics.Handler()).Methods(http.MethodGet)
 	r.HandleFunc("/api/render-preview", RenderPreviewHandler).Methods(http.MethodPost)
 
 	notesHandler := NewNotesHandler(notes)
@@ -27,5 +29,5 @@ func NewRouter(logger *slog.Logger, notes *repo.NoteRepo, comments *repo.Comment
 	r.HandleFunc("/api/comments/{id}", commentsHandler.Update).Methods(http.MethodPut)
 	r.HandleFunc("/api/comments/{id}", commentsHandler.Delete).Methods(http.MethodDelete)
 
-	return r
+	return metrics.Middleware(r)
 }

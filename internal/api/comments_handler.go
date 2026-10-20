@@ -8,6 +8,7 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"notebook/internal/metrics"
 	"notebook/internal/repo"
 )
 
@@ -55,6 +56,7 @@ func (h *CommentsHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "failed to create comment")
 		return
 	}
+	metrics.CommentsCreatedTotal.Inc()
 
 	writeJSON(w, http.StatusCreated, commentResponse{
 		ID: c.ID, NoteID: c.NoteID, Content: c.Content, AuthorID: c.AuthorID,
@@ -147,5 +149,6 @@ func (h *CommentsHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "failed to delete comment")
 		return
 	}
+	metrics.CommentsDeletedTotal.Inc()
 	w.WriteHeader(http.StatusNoContent)
 }
