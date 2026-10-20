@@ -3,6 +3,7 @@ import { onMounted, ref, watch } from 'vue'
 import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../stores/auth'
 import { useCommentsStore } from '../stores/comments'
+import { useNotesStore } from '../stores/notes'
 import CommentList from './CommentList.vue'
 import MarkdownEditor from './MarkdownEditor.vue'
 
@@ -11,52 +12,81 @@ const emit = defineEmits(['updated', 'deleted'])
 
 const auth = useAuthStore()
 const comments = useCommentsStore()
+const notesStore = useNotesStore()
 
 const note = ref(null)
 const notFound = ref(false)
+const loadError = ref('')
 const renderedHtml = ref('')
 const editing = ref(false)
 const editTitle = ref('')
 const editContent = ref('')
+const error = ref('')
+
+let loadSeq = 0
 
 async function load() {
   notFound.value = false
+  loadError.value = ''
   note.value = null
+  const seq = ++loadSeq
+  let loaded
   try {
-    note.value = await api.get(`/api/notes/${props.noteId}`)
+    loaded = await api.get(`/api/notes/${props.noteId}`)
   } catch (err) {
+    if (seq !== loadSeq) return
     if (err instanceof ApiError && err.status === 404) {
       notFound.value = true
       return
     }
-    throw err
+    loadError.value = err.message
+    return
   }
-  const rendered = await api.post('/api/render-preview', { content: note.value.content })
-  renderedHtml.value = rendered.html
-  await comments.fetchForNote(props.noteId)
+  if (seq !== loadSeq) return
+  note.value = loaded
+  try {
+    const rendered = await api.post('/api/render-preview', { content: note.value.content })
+    if (seq !== loadSeq) return
+    renderedHtml.value = rendered.html
+    await comments.fetchForNote(props.noteId)
+  } catch (err) {
+    if (seq !== loadSeq) return
+    loadError.value = err.message
+  }
 }
 
 function startEdit() {
   editTitle.value = note.value.title
   editContent.value = note.value.content
   editing.value = true
+  error.value = ''
 }
 
 async function saveEdit() {
-  const updated = await api.put(`/api/notes/${props.noteId}`, {
-    title: editTitle.value,
-    content: editContent.value,
-  })
-  note.value = updated
-  const rendered = await api.post('/api/render-preview', { content: updated.content })
-  renderedHtml.value = rendered.html
-  editing.value = false
-  emit('updated', updated)
+  error.value = ''
+  try {
+    const updated = await api.put(`/api/notes/${props.noteId}`, {
+      title: editTitle.value,
+      content: editContent.value,
+    })
+    note.value = updated
+    const rendered = await api.post('/api/render-preview', { content: updated.content })
+    renderedHtml.value = rendered.html
+    editing.value = false
+    emit('updated', updated)
+  } catch (err) {
+    error.value = err.message
+  }
 }
 
 async function remove() {
-  await api.delete(`/api/notes/${props.noteId}`)
-  emit('deleted', props.noteId)
+  error.value = ''
+  try {
+    await notesStore.remove(props.noteId)
+    emit('deleted', props.noteId)
+  } catch (err) {
+    error.value = err.message
+  }
 }
 
 onMounted(load)
@@ -65,7 +95,9 @@ watch(() => props.noteId, load)
 
 <template>
   <div v-if="notFound" class="text-gray-500 p-4">This note was not found.</div>
+  <div v-else-if="loadError" class="text-red-600 p-4">{{ loadError }}</div>
   <div v-else-if="note">
+    <p v-if="error" class="text-red-600">{{ error }}</p>
     <div v-if="!editing">
       <h2 class="text-xl font-bold">{{ note.title }}</h2>
       <div v-html="renderedHtml" />

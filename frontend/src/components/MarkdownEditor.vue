@@ -9,12 +9,17 @@ const tab = ref('write')
 const previewHtml = ref('')
 const previewError = ref('')
 
+let previewSeq = 0
+
 async function renderPreview() {
   previewError.value = ''
+  const seq = ++previewSeq
   try {
     const result = await api.post('/api/render-preview', { content: props.modelValue })
+    if (seq !== previewSeq) return
     previewHtml.value = result.html
   } catch (err) {
+    if (seq !== previewSeq) return
     previewError.value = err.message
   }
 }

@@ -15,16 +15,23 @@ const isNew = computed(() => route.name === 'note-new')
 
 const newTitle = ref('')
 const newContent = ref('')
+const error = ref('')
 
 function select(id) {
   router.push({ name: 'note-detail', params: { id } })
 }
 
 async function createNote() {
-  const created = await notes.create({ title: newTitle.value, content: newContent.value })
-  newTitle.value = ''
-  newContent.value = ''
-  router.push({ name: 'note-detail', params: { id: created.id } })
+  error.value = ''
+  try {
+    const created = await notes.create({ title: newTitle.value, content: newContent.value })
+    newTitle.value = ''
+    newContent.value = ''
+    await notes.fetchList()
+    router.push({ name: 'note-detail', params: { id: created.id } })
+  } catch (err) {
+    error.value = err.message
+  }
 }
 
 function onDeleted() {
@@ -46,13 +53,20 @@ function onDeleted() {
     </div>
     <div class="col-span-2">
       <div v-if="isNew">
+        <p v-if="error" class="text-red-600">{{ error }}</p>
         <input v-model="newTitle" class="border w-full p-1 mb-2" placeholder="Title" />
         <MarkdownEditor v-model="newContent" />
         <button type="button" class="mt-2 px-2 py-1 border rounded" @click="createNote">
           Create
         </button>
       </div>
-      <NoteDetail v-else-if="selectedId" :note-id="selectedId" @deleted="onDeleted" />
+      <NoteDetail
+        v-else-if="selectedId"
+        :key="selectedId"
+        :note-id="selectedId"
+        @deleted="onDeleted"
+        @updated="notes.fetchList()"
+      />
       <p v-else class="text-gray-500">Select a note from the list.</p>
     </div>
   </div>

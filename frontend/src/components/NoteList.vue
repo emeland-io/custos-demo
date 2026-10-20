@@ -5,12 +5,26 @@ import { useNotesStore } from '../stores/notes'
 const emit = defineEmits(['select'])
 const notes = useNotesStore()
 
+let searchSeq = 0
+let debounceTimer = null
+
 onMounted(() => notes.fetchList())
 
 function onSearchInput(event) {
-  notes.search = event.target.value
+  const value = event.target.value
+  clearTimeout(debounceTimer)
+  debounceTimer = setTimeout(() => runSearch(value), 250)
+}
+
+async function runSearch(value) {
+  notes.search = value
   notes.offset = 0
-  notes.fetchList()
+  const seq = ++searchSeq
+  await notes.fetchList()
+  if (seq !== searchSeq) {
+    // a newer search superseded this response; re-sync to the current search term
+    await notes.fetchList()
+  }
 }
 
 function nextPage() {
