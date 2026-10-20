@@ -10,25 +10,38 @@ import (
 	"notebook/internal/repo"
 )
 
-func NewRouter(logger *slog.Logger, notes *repo.NoteRepo, comments *repo.CommentRepo) http.Handler {
+type AuthWiring struct {
+	SessionMiddleware func(http.Handler) http.Handler
+	LoginHandler      http.HandlerFunc
+	CallbackHandler   http.HandlerFunc
+	LogoutHandler     http.HandlerFunc
+}
+
+func NewRouter(logger *slog.Logger, notes *repo.NoteRepo, comments *repo.CommentRepo, auth AuthWiring) http.Handler {
 	r := mux.NewRouter()
-	r.Use(metrics.Middleware)
 	r.HandleFunc("/healthz", HealthHandler).Methods(http.MethodGet)
 	r.Handle("/metrics", metrics.Handler()).Methods(http.MethodGet)
-	r.HandleFunc("/api/render-preview", RenderPreviewHandler).Methods(http.MethodPost)
+
+	r.HandleFunc("/auth/login", auth.LoginHandler).Methods(http.MethodGet)
+	r.HandleFunc("/auth/callback", auth.CallbackHandler).Methods(http.MethodGet)
+	r.HandleFunc("/auth/logout", auth.LogoutHandler).Methods(http.MethodPost)
+
+	api := r.PathPrefix("/api").Subrouter()
+	api.Use(auth.SessionMiddleware)
+	api.HandleFunc("/render-preview", RenderPreviewHandler).Methods(http.MethodPost)
 
 	notesHandler := NewNotesHandler(notes)
-	r.HandleFunc("/api/notes", notesHandler.List).Methods(http.MethodGet)
-	r.HandleFunc("/api/notes", notesHandler.Create).Methods(http.MethodPost)
-	r.HandleFunc("/api/notes/{id}", notesHandler.Get).Methods(http.MethodGet)
-	r.HandleFunc("/api/notes/{id}", notesHandler.Update).Methods(http.MethodPut)
-	r.HandleFunc("/api/notes/{id}", notesHandler.Delete).Methods(http.MethodDelete)
+	api.HandleFunc("/notes", notesHandler.List).Methods(http.MethodGet)
+	api.HandleFunc("/notes", notesHandler.Create).Methods(http.MethodPost)
+	api.HandleFunc("/notes/{id}", notesHandler.Get).Methods(http.MethodGet)
+	api.HandleFunc("/notes/{id}", notesHandler.Update).Methods(http.MethodPut)
+	api.HandleFunc("/notes/{id}", notesHandler.Delete).Methods(http.MethodDelete)
 
 	commentsHandler := NewCommentsHandler(comments)
-	r.HandleFunc("/api/notes/{noteId}/comments", commentsHandler.List).Methods(http.MethodGet)
-	r.HandleFunc("/api/notes/{noteId}/comments", commentsHandler.Create).Methods(http.MethodPost)
-	r.HandleFunc("/api/comments/{id}", commentsHandler.Update).Methods(http.MethodPut)
-	r.HandleFunc("/api/comments/{id}", commentsHandler.Delete).Methods(http.MethodDelete)
+	api.HandleFunc("/notes/{noteId}/comments", commentsHandler.List).Methods(http.MethodGet)
+	api.HandleFunc("/notes/{noteId}/comments", commentsHandler.Create).Methods(http.MethodPost)
+	api.HandleFunc("/comments/{id}", commentsHandler.Update).Methods(http.MethodPut)
+	api.HandleFunc("/comments/{id}", commentsHandler.Delete).Methods(http.MethodDelete)
 
-	return r
+	return metrics.Middleware(r)
 }

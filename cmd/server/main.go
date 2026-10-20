@@ -4,9 +4,10 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
-	"os"
 
 	"notebook/internal/api"
+	"notebook/internal/auth"
+	"notebook/internal/config"
 	"notebook/internal/db"
 	"notebook/internal/db/migrations"
 	"notebook/internal/logging"
@@ -17,7 +18,13 @@ func main() {
 	logger := logging.New()
 	ctx := context.Background()
 
-	pool, err := db.Connect(ctx, os.Getenv("DATABASE_URL"))
+	cfg, err := config.Load()
+	if err != nil {
+		logger.Error("invalid configuration", slog.String("error", err.Error()))
+		return
+	}
+
+	pool, err := db.Connect(ctx, cfg.DatabaseURL)
 	if err != nil {
 		logger.Error("failed to connect to database", slog.String("error", err.Error()))
 		return
@@ -29,10 +36,24 @@ func main() {
 		return
 	}
 
+	users := repo.NewUserRepo(pool)
 	notes := repo.NewNoteRepo(pool)
 	comments := repo.NewCommentRepo(pool)
 
-	router := api.NewRouter(logger, notes, comments)
+	provider, err := auth.NewProvider(ctx, cfg.OIDC)
+	if err != nil {
+		logger.Error("failed to initialize OIDC provider", slog.String("error", err.Error()))
+		return
+	}
+	flowCodec := auth.NewFlowCodec(cfg.Session.HashKey, cfg.Session.BlockKey)
+	sessionCodec := auth.NewSessionCodec(cfg.Session.HashKey, cfg.Session.BlockKey)
+
+	router := api.NewRouter(logger, notes, comments, api.AuthWiring{
+		SessionMiddleware: auth.NewSessionMiddleware(sessionCodec, users),
+		LoginHandler:      auth.NewLoginHandler(provider, flowCodec),
+		CallbackHandler:   auth.NewCallbackHandler(provider, flowCodec, sessionCodec, users, cfg.OIDC.AdminClaim, cfg.OIDC.AdminClaimValue, "/"),
+		LogoutHandler:     auth.NewLogoutHandler(sessionCodec),
+	})
 
 	logger.Info("starting server", slog.String("addr", ":8080"))
 	if err := http.ListenAndServe(":8080", router); err != nil {
