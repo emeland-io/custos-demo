@@ -24,12 +24,25 @@ func NewRouter(logger *slog.Logger, notes *repo.NoteRepo, comments *repo.Comment
 	r.HandleFunc("/healthz", HealthHandler).Methods(http.MethodGet)
 	r.Handle("/metrics", metrics.Handler()).Methods(http.MethodGet)
 
-	r.HandleFunc("/auth/login", auth.LoginHandler).Methods(http.MethodGet)
-	r.HandleFunc("/auth/callback", auth.CallbackHandler).Methods(http.MethodGet)
-	r.HandleFunc("/auth/logout", auth.LogoutHandler).Methods(http.MethodPost)
+	authRouter := r.PathPrefix("/auth").Subrouter()
+	authRouter.HandleFunc("/login", auth.LoginHandler).Methods(http.MethodGet)
+	authRouter.HandleFunc("/callback", auth.CallbackHandler).Methods(http.MethodGet)
+	authRouter.HandleFunc("/logout", auth.LogoutHandler).Methods(http.MethodPost)
+	authRouter.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSONError(w, http.StatusNotFound, "not found")
+	})
+	authRouter.MethodNotAllowedHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+	})
 
 	api := r.PathPrefix("/api").Subrouter()
 	api.Use(auth.SessionMiddleware)
+	api.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSONError(w, http.StatusNotFound, "not found")
+	})
+	api.MethodNotAllowedHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+	})
 	api.HandleFunc("/me", MeHandler).Methods(http.MethodGet)
 	api.HandleFunc("/render-preview", RenderPreviewHandler).Methods(http.MethodPost)
 

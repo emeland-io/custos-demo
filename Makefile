@@ -2,9 +2,9 @@
 
 frontend-dist:
 	cd frontend && npm ci && npm run build
-	rm -rf internal/webassets/dist
-	mkdir -p internal/webassets/dist
+	find internal/webassets/dist -mindepth 1 ! -name README.txt -delete
 	cp -r frontend/dist/. internal/webassets/dist/
+	git checkout -- internal/webassets/dist/README.txt
 
 test:
 	go test ./...
