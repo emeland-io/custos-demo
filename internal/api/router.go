@@ -29,6 +29,7 @@ func NewRouter(logger *slog.Logger, notes *repo.NoteRepo, comments *repo.Comment
 
 	api := r.PathPrefix("/api").Subrouter()
 	api.Use(auth.SessionMiddleware)
+	api.HandleFunc("/me", MeHandler).Methods(http.MethodGet)
 	api.HandleFunc("/render-preview", RenderPreviewHandler).Methods(http.MethodPost)
 
 	notesHandler := NewNotesHandler(notes)
