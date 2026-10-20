@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: notebook
+      POSTGRES_USER: notebook
+      POSTGRES_PASSWORD: notebook
+    ports:
+      - "5432:5432"
+    volumes:
+      - notebook-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  notebook-postgres-data:
