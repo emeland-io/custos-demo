@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { createTestingPinia } from '@pinia/testing'
 import { createRouter, createWebHistory } from 'vue-router'
 import App from './App.vue'
 
@@ -12,7 +13,8 @@ describe('App', () => {
     router.push('/')
     await router.isReady()
 
-    const wrapper = mount(App, { global: { plugins: [router] } })
+    const pinia = createTestingPinia()
+    const wrapper = mount(App, { global: { plugins: [pinia, router] } })
     expect(wrapper.exists()).toBe(true)
   })
 })
