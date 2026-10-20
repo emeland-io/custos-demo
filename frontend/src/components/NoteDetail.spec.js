@@ -4,11 +4,15 @@ import { createTestingPinia } from '@pinia/testing'
 import NoteDetail from './NoteDetail.vue'
 import { useAuthStore } from '../stores/auth'
 import { useCommentsStore } from '../stores/comments'
-import { api } from '../lib/api'
+import { api, ApiError } from '../lib/api'
 
-vi.mock('../lib/api', () => ({
-  api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
-}))
+vi.mock('../lib/api', async () => {
+  const actual = await vi.importActual('../lib/api')
+  return {
+    api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
+    ApiError: actual.ApiError,
+  }
+})
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -74,6 +78,14 @@ describe('NoteDetail', () => {
 
     expect(api.delete).toHaveBeenCalledWith('/api/notes/1')
     expect(wrapper.emitted('deleted')[0]).toEqual([1])
+  })
+
+  it('shows a not-found state for a 404 and does not throw', async () => {
+    api.get.mockRejectedValue(new ApiError(404, 'not found'))
+    const { wrapper } = mountDetail(1)
+    await flushAll(wrapper)
+    expect(wrapper.text()).toContain('not found')
+    expect(api.post).not.toHaveBeenCalled()
   })
 })
 
