@@ -1,7 +1,10 @@
 package auth
 
 import (
+	"errors"
 	"net/http"
+
+	"github.com/jackc/pgx/v5"
 
 	"notebook/internal/api"
 	"notebook/internal/repo"
@@ -17,8 +20,12 @@ func NewSessionMiddleware(sessionCodec *SessionCodec, users *repo.UserRepo) func
 			}
 
 			user, err := users.GetByID(r.Context(), userID)
-			if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
 				writeAuthError(w, http.StatusUnauthorized, "authentication required")
+				return
+			}
+			if err != nil {
+				writeAuthError(w, http.StatusInternalServerError, "failed to look up session")
 				return
 			}
 

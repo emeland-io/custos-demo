@@ -19,6 +19,7 @@ type AuthWiring struct {
 
 func NewRouter(logger *slog.Logger, notes *repo.NoteRepo, comments *repo.CommentRepo, auth AuthWiring) http.Handler {
 	r := mux.NewRouter()
+	r.Use(metrics.Middleware)
 	r.HandleFunc("/healthz", HealthHandler).Methods(http.MethodGet)
 	r.Handle("/metrics", metrics.Handler()).Methods(http.MethodGet)
 
@@ -43,5 +44,5 @@ func NewRouter(logger *slog.Logger, notes *repo.NoteRepo, comments *repo.Comment
 	api.HandleFunc("/comments/{id}", commentsHandler.Update).Methods(http.MethodPut)
 	api.HandleFunc("/comments/{id}", commentsHandler.Delete).Methods(http.MethodDelete)
 
-	return metrics.Middleware(r)
+	return r
 }

@@ -3,6 +3,7 @@ package auth_test
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -22,7 +23,12 @@ type fakeOIDCServer struct {
 	ClientSecret string
 
 	key         *rsa.PrivateKey
-	issuedCodes map[string]map[string]any
+	issuedCodes map[string]*issuedCode
+}
+
+type issuedCode struct {
+	claims        map[string]any
+	codeChallenge string
 }
 
 func newFakeOIDCServer(t *testing.T) *fakeOIDCServer {
@@ -36,7 +42,7 @@ func newFakeOIDCServer(t *testing.T) *fakeOIDCServer {
 		ClientID:     "test-client",
 		ClientSecret: "test-secret",
 		key:          key,
-		issuedCodes:  map[string]map[string]any{},
+		issuedCodes:  map[string]*issuedCode{},
 	}
 
 	mux := http.NewServeMux()
@@ -75,23 +81,35 @@ func (f *fakeOIDCServer) handleKeys(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]any{jwk}})
 }
 
-// IssueCode registers claims for a fresh, single-use authorization
-// code that /token will exchange for a signed ID token containing
-// exactly those claims (plus iss/aud/exp/iat).
-func (f *fakeOIDCServer) IssueCode(claims map[string]any) string {
+// IssueCode registers claims and the PKCE code_challenge for a fresh,
+// single-use authorization code. /token will exchange it for a signed
+// ID token containing exactly those claims (plus iss/aud/exp/iat), but
+// only if the matching code_verifier is presented.
+func (f *fakeOIDCServer) IssueCode(claims map[string]any, codeChallenge string) string {
 	code := fmt.Sprintf("code-%d", len(f.issuedCodes)+1)
-	f.issuedCodes[code] = claims
+	f.issuedCodes[code] = &issuedCode{claims: claims, codeChallenge: codeChallenge}
 	return code
+}
+
+func pkceChallenge(verifier string) string {
+	sum := sha256.Sum256([]byte(verifier))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
 func (f *fakeOIDCServer) handleToken(w http.ResponseWriter, r *http.Request) {
 	code := r.FormValue("code")
-	claims, ok := f.issuedCodes[code]
+	issued, ok := f.issuedCodes[code]
 	if !ok {
 		http.Error(w, "invalid_grant", http.StatusBadRequest)
 		return
 	}
 	delete(f.issuedCodes, code)
+
+	verifier := r.FormValue("code_verifier")
+	if issued.codeChallenge == "" || pkceChallenge(verifier) != issued.codeChallenge {
+		http.Error(w, "invalid_grant: PKCE verification failed", http.StatusBadRequest)
+		return
+	}
 
 	now := time.Now()
 	allClaims := jwt.MapClaims{
@@ -100,7 +118,7 @@ func (f *fakeOIDCServer) handleToken(w http.ResponseWriter, r *http.Request) {
 		"exp": now.Add(5 * time.Minute).Unix(),
 		"iat": now.Unix(),
 	}
-	for k, v := range claims {
+	for k, v := range issued.claims {
 		allClaims[k] = v
 	}
 

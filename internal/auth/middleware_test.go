@@ -9,7 +9,10 @@ import (
 
 	"notebook/internal/api"
 	"notebook/internal/auth"
+	"notebook/internal/db"
+	"notebook/internal/db/migrations"
 	"notebook/internal/models"
+	"notebook/internal/repo"
 )
 
 func TestSessionMiddleware_ValidSession_InjectsUser(t *testing.T) {
@@ -85,6 +88,42 @@ func TestSessionMiddleware_SessionForDeletedUser_Returns401(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for a session pointing at a nonexistent user, got %d", rec.Code)
+	}
+}
+
+func TestSessionMiddleware_DatabaseError_Returns500NotUnauthorized(t *testing.T) {
+	dsn := authTestDSN(t)
+	pool, err := db.Connect(context.Background(), dsn)
+	if err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	if err := migrations.Up(context.Background(), pool); err != nil {
+		t.Fatalf("migrations failed: %v", err)
+	}
+	users := repo.NewUserRepo(pool)
+
+	sessionCodec := auth.NewSessionCodec([]byte("0123456789abcdef0123456789abcdef"), []byte("0123456789abcdef0123456789abcdef"))
+	setRec := httptest.NewRecorder()
+	if err := sessionCodec.SetSession(setRec, 1, time.Hour); err != nil {
+		t.Fatalf("set session failed: %v", err)
+	}
+
+	// Close the pool to force GetByID to fail with something other than
+	// "no rows" - a transient DB outage, not an invalid session.
+	pool.Close()
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("next handler should not be called when the database is unreachable")
+	})
+	handler := auth.NewSessionMiddleware(sessionCodec, users)(next)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/notes", nil)
+	req.Header.Set("Cookie", setRec.Header().Get("Set-Cookie"))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for a database error, got %d", rec.Code)
 	}
 }
 

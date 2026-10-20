@@ -61,6 +61,10 @@ func TestLoginThenCallback_CreatesSessionAndUpsertsUser(t *testing.T) {
 	if state == "" {
 		t.Fatalf("expected state query param on redirect")
 	}
+	codeChallenge := redirectURL.Query().Get("code_challenge")
+	if codeChallenge == "" {
+		t.Fatalf("expected code_challenge query param on redirect")
+	}
 
 	// --- Simulate the IdP issuing a code for this flow's claims ---
 	code := fake.IssueCode(map[string]any{
@@ -68,7 +72,7 @@ func TestLoginThenCallback_CreatesSessionAndUpsertsUser(t *testing.T) {
 		"email":  "alice@example.com",
 		"name":   "Alice",
 		"groups": []any{"notebook-admin"},
-	})
+	}, codeChallenge)
 
 	// --- Callback ---
 	callbackHandler := auth.NewCallbackHandler(provider, flowCodec, sessionCodec, users, "groups", "notebook-admin", "/")
@@ -131,6 +135,95 @@ func TestCallback_WrongState_IsRejected(t *testing.T) {
 
 	if callbackRec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for mismatched state, got %d", callbackRec.Code)
+	}
+}
+
+func TestCallback_WrongPKCEVerifier_IsRejected(t *testing.T) {
+	fake := newFakeOIDCServer(t)
+	provider, err := auth.NewProvider(context.Background(), config.OIDCConfig{
+		IssuerURL:    fake.IssuerURL,
+		ClientID:     fake.ClientID,
+		ClientSecret: fake.ClientSecret,
+		RedirectURL:  "https://app.example.com/auth/callback",
+	})
+	if err != nil {
+		t.Fatalf("failed to build provider: %v", err)
+	}
+
+	flowCodec := auth.NewFlowCodec([]byte("fedcba9876543210fedcba9876543210"), []byte("fedcba9876543210fedcba9876543210"))
+	sessionCodec := auth.NewSessionCodec([]byte("0123456789abcdef0123456789abcdef"), []byte("0123456789abcdef0123456789abcdef"))
+	users := newAuthTestUserRepo(t)
+
+	loginHandler := auth.NewLoginHandler(provider, flowCodec)
+	loginReq := httptest.NewRequest(http.MethodGet, "/auth/login", nil)
+	loginRec := httptest.NewRecorder()
+	loginHandler(loginRec, loginReq)
+	redirectURL, err := url.Parse(loginRec.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("failed to parse redirect URL: %v", err)
+	}
+	state := redirectURL.Query().Get("state")
+
+	// Issue the code against a challenge that does NOT match the
+	// verifier stashed in this flow's cookie, simulating an
+	// authorization code obtained for a different (or forged) flow.
+	code := fake.IssueCode(map[string]any{
+		"sub":    "user-sub-1",
+		"email":  "alice@example.com",
+		"groups": []any{"notebook-admin"},
+	}, "wrong-challenge-does-not-match-verifier")
+
+	callbackHandler := auth.NewCallbackHandler(provider, flowCodec, sessionCodec, users, "groups", "notebook-admin", "/")
+	callbackReq := httptest.NewRequest(http.MethodGet, "/auth/callback?state="+state+"&code="+code, nil)
+	callbackReq.Header.Set("Cookie", loginRec.Header().Get("Set-Cookie"))
+	callbackRec := httptest.NewRecorder()
+	callbackHandler(callbackRec, callbackReq)
+
+	if callbackRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 when the code_verifier doesn't match the issued challenge, got %d: %s", callbackRec.Code, callbackRec.Body.String())
+	}
+}
+
+func TestCallback_MissingSubClaim_IsRejected(t *testing.T) {
+	fake := newFakeOIDCServer(t)
+	provider, err := auth.NewProvider(context.Background(), config.OIDCConfig{
+		IssuerURL:    fake.IssuerURL,
+		ClientID:     fake.ClientID,
+		ClientSecret: fake.ClientSecret,
+		RedirectURL:  "https://app.example.com/auth/callback",
+	})
+	if err != nil {
+		t.Fatalf("failed to build provider: %v", err)
+	}
+
+	flowCodec := auth.NewFlowCodec([]byte("fedcba9876543210fedcba9876543210"), []byte("fedcba9876543210fedcba9876543210"))
+	sessionCodec := auth.NewSessionCodec([]byte("0123456789abcdef0123456789abcdef"), []byte("0123456789abcdef0123456789abcdef"))
+	users := newAuthTestUserRepo(t)
+
+	loginHandler := auth.NewLoginHandler(provider, flowCodec)
+	loginReq := httptest.NewRequest(http.MethodGet, "/auth/login", nil)
+	loginRec := httptest.NewRecorder()
+	loginHandler(loginRec, loginReq)
+	redirectURL, err := url.Parse(loginRec.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("failed to parse redirect URL: %v", err)
+	}
+	state := redirectURL.Query().Get("state")
+	codeChallenge := redirectURL.Query().Get("code_challenge")
+
+	// No "sub" claim at all - a misconfigured IdP or claim mapper.
+	code := fake.IssueCode(map[string]any{
+		"email": "no-subject@example.com",
+	}, codeChallenge)
+
+	callbackHandler := auth.NewCallbackHandler(provider, flowCodec, sessionCodec, users, "groups", "notebook-admin", "/")
+	callbackReq := httptest.NewRequest(http.MethodGet, "/auth/callback?state="+state+"&code="+code, nil)
+	callbackReq.Header.Set("Cookie", loginRec.Header().Get("Set-Cookie"))
+	callbackRec := httptest.NewRecorder()
+	callbackHandler(callbackRec, callbackReq)
+
+	if callbackRec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502 for an id_token with no sub claim, got %d: %s", callbackRec.Code, callbackRec.Body.String())
 	}
 }
 

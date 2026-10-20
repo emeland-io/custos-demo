@@ -90,7 +90,11 @@ func NewCallbackHandler(
 			return
 		}
 
-		subject, _ := claims["sub"].(string)
+		subject := idToken.Subject
+		if subject == "" {
+			writeAuthError(w, http.StatusBadGateway, "identity provider did not return a subject claim")
+			return
+		}
 		email, _ := claims["email"].(string)
 		displayName, _ := claims["name"].(string)
 		if displayName == "" {

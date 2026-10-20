@@ -11,7 +11,8 @@ import (
 )
 
 const flowCookieName = "notebook_oidc_flow"
-const flowTTL = 10 * time.Minute
+
+var flowTTL = 10 * time.Minute
 
 type flowData struct {
 	State    string
@@ -23,7 +24,7 @@ type FlowCodec struct {
 }
 
 func NewFlowCodec(hashKey, blockKey []byte) *FlowCodec {
-	return &FlowCodec{sc: securecookie.New(hashKey, blockKey)}
+	return &FlowCodec{sc: securecookie.New(hashKey, blockKey).MaxAge(int(flowTTL.Seconds()))}
 }
 
 func (c *FlowCodec) SetFlow(w http.ResponseWriter, state, verifier string) error {

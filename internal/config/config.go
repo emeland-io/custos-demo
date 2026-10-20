@@ -47,6 +47,14 @@ func Load() (*Config, error) {
 	if hashKey == "" || blockKey == "" {
 		return nil, fmt.Errorf("SESSION_HASH_KEY and SESSION_BLOCK_KEY must both be set")
 	}
+	if len(hashKey) < 32 {
+		return nil, fmt.Errorf("SESSION_HASH_KEY must be at least 32 bytes, got %d", len(hashKey))
+	}
+	switch len(blockKey) {
+	case 16, 24, 32:
+	default:
+		return nil, fmt.Errorf("SESSION_BLOCK_KEY must be 16, 24, or 32 bytes (AES-128/192/256), got %d", len(blockKey))
+	}
 	cfg.Session.HashKey = []byte(hashKey)
 	cfg.Session.BlockKey = []byte(blockKey)
 
