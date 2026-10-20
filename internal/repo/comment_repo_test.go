@@ -2,6 +2,7 @@ package repo_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"notebook/internal/repo"
@@ -84,5 +85,39 @@ func TestNoteRepo_SoftDelete_CascadesToComments(t *testing.T) {
 	}
 	if len(list) != 0 {
 		t.Fatalf("expected comments hidden after note soft delete, got %d visible", len(list))
+	}
+}
+
+func TestCommentRepo_Create_OnSoftDeletedNote_ReturnsNotFound(t *testing.T) {
+	pool := newTestPool(t)
+	ctx := context.Background()
+	users := repo.NewUserRepo(pool)
+	notes := repo.NewNoteRepo(pool)
+	comments := repo.NewCommentRepo(pool)
+
+	author := seedUser(t, users, "deleted-note-author")
+	note, err := notes.Create(ctx, "Title", "Content", author.ID)
+	if err != nil {
+		t.Fatalf("create note failed: %v", err)
+	}
+	if err := notes.SoftDelete(ctx, note.ID); err != nil {
+		t.Fatalf("soft delete note failed: %v", err)
+	}
+
+	if _, err := comments.Create(ctx, note.ID, "Too late", author.ID); !errors.Is(err, repo.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound creating a comment on a deleted note, got %v", err)
+	}
+}
+
+func TestCommentRepo_Create_OnNonexistentNote_ReturnsNotFound(t *testing.T) {
+	pool := newTestPool(t)
+	ctx := context.Background()
+	users := repo.NewUserRepo(pool)
+	comments := repo.NewCommentRepo(pool)
+
+	author := seedUser(t, users, "orphan-commenter")
+
+	if _, err := comments.Create(ctx, 999999, "Orphan comment", author.ID); !errors.Is(err, repo.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound creating a comment on a nonexistent note, got %v", err)
 	}
 }

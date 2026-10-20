@@ -12,6 +12,7 @@ import (
 
 func NewRouter(logger *slog.Logger, notes *repo.NoteRepo, comments *repo.CommentRepo) http.Handler {
 	r := mux.NewRouter()
+	r.Use(metrics.Middleware)
 	r.HandleFunc("/healthz", HealthHandler).Methods(http.MethodGet)
 	r.Handle("/metrics", metrics.Handler()).Methods(http.MethodGet)
 	r.HandleFunc("/api/render-preview", RenderPreviewHandler).Methods(http.MethodPost)
@@ -29,5 +30,5 @@ func NewRouter(logger *slog.Logger, notes *repo.NoteRepo, comments *repo.Comment
 	r.HandleFunc("/api/comments/{id}", commentsHandler.Update).Methods(http.MethodPut)
 	r.HandleFunc("/api/comments/{id}", commentsHandler.Delete).Methods(http.MethodDelete)
 
-	return metrics.Middleware(r)
+	return r
 }

@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -52,6 +53,23 @@ func (s *statusRecorder) WriteHeader(code int) {
 	s.ResponseWriter.WriteHeader(code)
 }
 
+// routeLabel returns the mux path template for r (e.g. "/api/notes/{id}"),
+// bounding metric cardinality to the number of registered routes. It
+// falls back to "unmatched" when no mux route matched (e.g. a 404, or
+// a request that never went through mux route matching at all, as in
+// a standalone unit test of Middleware).
+func routeLabel(r *http.Request) string {
+	route := mux.CurrentRoute(r)
+	if route == nil {
+		return "unmatched"
+	}
+	tpl, err := route.GetPathTemplate()
+	if err != nil {
+		return "unmatched"
+	}
+	return tpl
+}
+
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		httpInFlight.Inc()
@@ -62,7 +80,7 @@ func Middleware(next http.Handler) http.Handler {
 		next.ServeHTTP(rec, r)
 		duration := time.Since(start).Seconds()
 
-		route := r.URL.Path
+		route := routeLabel(r)
 		httpRequestsTotal.WithLabelValues(route, strconv.Itoa(rec.status)).Inc()
 		httpRequestDuration.WithLabelValues(route).Observe(duration)
 	})

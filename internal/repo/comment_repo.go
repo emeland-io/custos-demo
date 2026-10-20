@@ -21,10 +21,15 @@ func NewCommentRepo(pool *pgxpool.Pool) *CommentRepo {
 func (r *CommentRepo) Create(ctx context.Context, noteID int64, content string, authorID int64) (*models.Comment, error) {
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO comments (note_id, content, author_id)
-		VALUES ($1, $2, $3)
+		SELECT $1, $2, $3
+		WHERE EXISTS (SELECT 1 FROM notes WHERE id = $1 AND deleted_at IS NULL)
 		RETURNING id, note_id, content, author_id, created_at, updated_at, deleted_at
 	`, noteID, content, authorID)
-	return scanComment(row)
+	c, err := scanComment(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return c, err
 }
 
 func (r *CommentRepo) GetByID(ctx context.Context, id int64) (*models.Comment, error) {
@@ -68,10 +73,11 @@ func (r *CommentRepo) SoftDelete(ctx context.Context, id int64) error {
 
 func (r *CommentRepo) ListByNoteID(ctx context.Context, noteID int64) ([]models.Comment, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, note_id, content, author_id, created_at, updated_at, deleted_at
-		FROM comments
-		WHERE note_id = $1 AND deleted_at IS NULL
-		ORDER BY created_at ASC
+		SELECT c.id, c.note_id, c.content, c.author_id, c.created_at, c.updated_at, c.deleted_at
+		FROM comments c
+		JOIN notes n ON n.id = c.note_id AND n.deleted_at IS NULL
+		WHERE c.note_id = $1 AND c.deleted_at IS NULL
+		ORDER BY c.created_at ASC
 	`, noteID)
 	if err != nil {
 		return nil, err

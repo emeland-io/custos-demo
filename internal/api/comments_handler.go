@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -52,6 +53,10 @@ func (h *CommentsHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	c, err := h.comments.Create(r.Context(), noteID, req.Content, user.ID)
+	if errors.Is(err, repo.ErrNotFound) {
+		writeJSONError(w, http.StatusNotFound, "note not found")
+		return
+	}
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "failed to create comment")
 		return

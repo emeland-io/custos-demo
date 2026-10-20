@@ -86,3 +86,23 @@ func TestCommentsHandler_DeleteByNonAuthorIsForbidden(t *testing.T) {
 		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestCommentsHandler_CreateOnDeletedNote_Returns404(t *testing.T) {
+	router, notes, _, author := newCommentsTestServer(t, nil)
+	note, err := notes.Create(context.Background(), "Title", "Content", author.ID)
+	if err != nil {
+		t.Fatalf("seed note failed: %v", err)
+	}
+	if err := notes.SoftDelete(context.Background(), note.ID); err != nil {
+		t.Fatalf("soft delete note failed: %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]string{"content": "Too late"})
+	req := httptest.NewRequest(http.MethodPost, "/api/notes/"+itoa(note.ID)+"/comments", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
