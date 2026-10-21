@@ -21,7 +21,7 @@ plan's execution starts.
 | 3 | [Vue frontend](plans/2026-10-19-notebook-frontend.md) | **Done** | Note list/detail/editor panes, Pinia stores, `/api/me` addition. |
 | 4 | [Container build & static asset embedding](plans/2026-10-19-notebook-container-build.md) | **Done** | `embed.FS` + SPA fallback, multi-stage Dockerfile, local dev compose. |
 | 5 | [Helm chart & Kubernetes deployment](plans/2026-10-19-notebook-helm-chart.md) | **Done** | Merged to `main`. Chart, CloudNativePG `Cluster`, pre-upgrade migration Job + `--migrate-only` flag, PodMonitor, dev/prod values, README. |
-| 6 | [E2E test framework & CI](plans/2026-10-19-notebook-e2e-ci.md) | Not started | kind+Dex+Ginkgo cluster suite, Playwright frontend suite, GitHub Actions wiring. |
+| 6 | [E2E test framework & CI](plans/2026-10-19-notebook-e2e-ci.md) | **Done** | Merged to `main`. `devcluster` CLI (kind+cert-manager+ingress-nginx+kube-prometheus-stack+CNPG+Dex+real chart), Ginkgo cluster suite, Playwright browser suite, GitHub Actions wiring. |
 
 ## Phase 1 — completed detail
 
@@ -340,14 +340,117 @@ literal text, each ledgered with cost-if-wrong at the time):
   the app already self-migrates on every startup. Cost if wrong: a
   one-line annotation revert.
 
-## Next up
+## Phase 6 — completed detail
 
-Plan 6 (E2E test framework & CI) is next. Its handoff note (once read
-against this phase's actual outcome) will need to account for: the chart
-living at `deploy/helm/notebook`, the migration Job's hook phase being
-`pre-upgrade` only (not `pre-upgrade,pre-install` as Plan 5's original
-text specified), the Job being named `<fullname>-migrate-<revision>`,
-and `--migrate-only` being the exact flag name added to `cmd/server/
-main.go`. Per Plan 5's own handoff note, **the reviewer who signed off
-on this phase's final review must read Plan 6 against what was actually
-built** before Plan 6 execution begins.
+**Branch:** `notebook/plan-6-e2e-ci`, built in an isolated worktree at
+`.claude/worktrees/notebook-plan-6-e2e-ci` (merged to `main` by
+fast-forward, worktree and branch removed after merge).
+
+**Commits merged (11):** 10 task commits (devcluster CLI skeleton;
+kind cluster lifecycle; idempotent Helm release installer; test
+namespace + self-signed ClusterIssuer; Dex test OIDC provider;
+image/secrets/chart-install/port-forward helpers; Up/Down
+orchestration + state persistence; Ginkgo suite; Playwright suite; CI
+workflow) plus 1 fix-pass commit (`29991ac`) from the final
+whole-branch review.
+
+**Handoff verification (required before execution started):** re-read
+Plan 6's Handoff Note against the actual Plan 1–5 codebase — chart
+value names/keys, `OIDCConfig.AdminClaim`/`AdminClaimValue` accepting
+any claim, `--migrate-only`'s exact flag name, Service name/port, and
+the `/auth/login` → Dex → `/auth/callback` → `/notes` redirect chain
+all matched exactly. One real drift found beyond what Plan 5's own
+review flagged in its README: the chart (`postgres-cluster.yaml`)
+unconditionally creates its own CNPG `Cluster` named
+`<fullname>-postgres`, but the plan's own Task 4 additionally stood up
+a second, independent test Cluster that nothing referenced, while
+Task 6 wired `postgresql.credentialsSecretRef.name` to a secret name
+that didn't match either Cluster's actual CNPG-generated name. Dropped
+the redundant Cluster and corrected the secret name to
+`<releaseName>-notebook-postgres-app`.
+
+**Final review:** fresh reviewer (Opus, general-purpose subagent),
+dispatched with the plan's Review Focus section verbatim and the full
+implementation ledger (every ruling made during the build) for it to
+weigh, plus independent verification of the Postgres secret-naming
+ruling against the actual chart templates. Verdict: "Ready to merge:
+With fixes." 1 Critical + 6 Important findings fixed (each verified
+live against a real kind cluster, several with a failing unit test
+written first); 10 Minor findings deferred as non-blocking.
+
+**Fixed before merge:**
+- Critical: the Ginkgo suite's `AfterSuite` unconditionally tore the
+  environment down, deleting the test namespace the very next CI step
+  (the Playwright suite) needed — CI's `e2e-cluster` job could never
+  have passed its Playwright step as originally written. Fixed by
+  having `BeforeSuite` reuse an already-up environment instead of
+  calling `Up()` again, and `AfterSuite` only tear down when the suite
+  run itself created the environment.
+- Important: Dex restarted on every `up` (not just on real config
+  changes) because `RenderDexConfig` re-hashed the test password with
+  a randomly-salted bcrypt call on every render, making the Dex
+  config's checksum differ every time. Fixed with a precomputed,
+  deterministic hash constant.
+- Important: `EnsureHelmRelease`'s skip check treated
+  `failed`/`pending-install` cluster-dependency releases as already
+  installed, so a dependency that died mid-install on one `up` was
+  skipped forever rather than retried. Fixed by filtering the list to
+  `--deployed`.
+- Important: no kube-context pinning anywhere — every kubectl/helm
+  call acted on whatever context the caller's kubeconfig currently
+  pointed at, risking mutating a different (possibly shared or
+  production) cluster after a context switch. Fixed by pinning
+  `--context`/`--kube-context kind-notebook-e2e` on every call.
+- Important: a second `up` without a `down` could orphan the first
+  run's port-forward processes and overwrite their PIDs in state with
+  a new one, leaving `down` nothing to stop. Fixed by stopping any
+  port-forwards already recorded in state before starting new ones.
+- Important: `Down()` returned on the first failed step, so a broken
+  or partially-created environment could leave later cleanup steps
+  (deleting the kind cluster, clearing state) never attempted. Fixed
+  to run every step regardless and join all errors.
+
+**Deferred minors (10, not acted on, logged in the merge commit and
+session history):** `LoginViaDex` judges login success only by the
+final HTTP status (a credentials mismatch that still 200s would
+surface later as a confusing error instead of a clear login failure);
+no explicit HTTP client/spec timeouts in the Ginkgo suite beyond the
+30-minute `go test` timeout; `readSecretKey` treats any kubectl error
+as "secret doesn't exist yet" rather than only NotFound; the
+skip-logic unit tests only assert "no error" on the skip path, not
+that the install call was actually skipped; `state_test.go` shares its
+real state-file path with a live environment (made safe by its own
+backup/restore, but still not an injected path); `RepoRoot()` doesn't
+reject a `go env GOMOD` result of `/dev/null`; `E2E_DEX_ADDR` isn't
+validated before use in `playwright.config.js`; CI's `helm-lint` job
+has no negative case proving the backup block's `required` guards
+still reject misconfiguration; the image tag never changes across
+local `up` re-runs, so a local code change isn't redeployed without an
+explicit `down` first; Playwright specs accumulate notes across
+repeated local runs (harmless on a fresh CI cluster).
+
+**Rulings made during implementation** (deviations from the plan's
+literal text, each ledgered with cost-if-wrong at the time):
+- Dropped the plan's own test-only CNPG Cluster manifest (Task 4) as
+  redundant and wrong, per the Handoff-verification finding above.
+- Live verification against a real kind cluster and a real Chromium
+  browser surfaced roughly a dozen further real bugs invisible to any
+  unit test alone — each fixed with its own failing test first, then
+  reverified live. Highlights: Dex's rendered login form requires a
+  `name` field the plan's config template omitted; a ConfigMap content
+  change doesn't restart a Deployment's existing pods, so Dex needed a
+  `checksum/config` pod-template annotation; `go test`'s working
+  directory is the test package directory, not the repo root, breaking
+  the plan's repo-root-relative `docker build`/`helm` paths; Dex's
+  issuer hostname only resolves inside the cluster's own DNS, requiring
+  a second port-forward plus a Go `http.Transport`/Chromium
+  `--host-resolver-rules` override for both test clients; Dex
+  HTML-escapes its login form's action attribute, and the plan's
+  scraping regex needed an `html.UnescapeString` before parsing it as a
+  URL; Playwright's unquoted `text=` selector substring-matches, and
+  fixture note titles happened to collide with button labels
+  ("To Edit" vs. the Edit button), silently clicking the wrong element.
+- Hit (and resolved, with the user's explicit consent) unrelated
+  environmental resource contention from a pre-existing, unrelated
+  `kind` cluster already running on the machine; deleted it after
+  confirming with the user rather than working around it silently.
