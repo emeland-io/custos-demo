@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "notebook.fullname" . }}
+  labels:
+    {{- include "notebook.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "notebook.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "notebook.selectorLabels" . | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.service.port }}"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: notebook
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "postgresql.credentialsSecretRef.name is required" .Values.postgresql.credentialsSecretRef.name }}
+                  key: {{ .Values.postgresql.credentialsSecretRef.key }}
+            - name: OIDC_ISSUER_URL
+              value: {{ required "oidc.issuerURL is required" .Values.oidc.issuerURL | quote }}
+            - name: OIDC_REDIRECT_URL
+              value: {{ required "oidc.redirectURL is required" .Values.oidc.redirectURL | quote }}
+            - name: OIDC_ADMIN_CLAIM
+              value: {{ .Values.oidc.adminClaim | quote }}
+            - name: OIDC_ADMIN_CLAIM_VALUE
+              value: {{ .Values.oidc.adminClaimValue | quote }}
+            - name: OIDC_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "oidc.clientIDSecretRef.name is required" .Values.oidc.clientIDSecretRef.name }}
+                  key: {{ .Values.oidc.clientIDSecretRef.key }}
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "oidc.clientSecretSecretRef.name is required" .Values.oidc.clientSecretSecretRef.name }}
+                  key: {{ .Values.oidc.clientSecretSecretRef.key }}
+            - name: SESSION_HASH_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "session.hashKeySecretRef.name is required" .Values.session.hashKeySecretRef.name }}
+                  key: {{ .Values.session.hashKeySecretRef.key }}
+            - name: SESSION_BLOCK_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "session.blockKeySecretRef.name is required" .Values.session.blockKeySecretRef.name }}
+                  key: {{ .Values.session.blockKeySecretRef.key }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
