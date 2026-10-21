@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.1"
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test ./...
+
+  frontend-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run test
+      - run: npm run build
+
+  helm-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: helm lint (default values)
+        run: |
+          helm lint deploy/helm/notebook \
+            --set ingress.className=nginx --set ingress.host=x --set ingress.tls.clusterIssuer=x \
+            --set postgresql.credentialsSecretRef.name=x \
+            --set oidc.issuerURL=https://x --set oidc.redirectURL=https://x/auth/callback \
+            --set oidc.clientIDSecretRef.name=x --set oidc.clientSecretSecretRef.name=x \
+            --set session.hashKeySecretRef.name=x --set session.blockKeySecretRef.name=x
+      - name: helm template (default values)
+        run: |
+          helm template deploy/helm/notebook \
+            --set ingress.className=nginx --set ingress.host=x --set ingress.tls.clusterIssuer=x \
+            --set postgresql.credentialsSecretRef.name=x \
+            --set oidc.issuerURL=https://x --set oidc.redirectURL=https://x/auth/callback \
+            --set oidc.clientIDSecretRef.name=x --set oidc.clientSecretSecretRef.name=x \
+            --set session.hashKeySecretRef.name=x --set session.blockKeySecretRef.name=x > /dev/null
+      - name: helm template (backup enabled)
+        run: |
+          helm template deploy/helm/notebook \
+            --set ingress.className=nginx --set ingress.host=x --set ingress.tls.clusterIssuer=x \
+            --set postgresql.credentialsSecretRef.name=x \
+            --set oidc.issuerURL=https://x --set oidc.redirectURL=https://x/auth/callback \
+            --set oidc.clientIDSecretRef.name=x --set oidc.clientSecretSecretRef.name=x \
+            --set session.hashKeySecretRef.name=x --set session.blockKeySecretRef.name=x \
+            --set postgresql.backup.enabled=true \
+            --set postgresql.backup.destinationPath=s3://bucket/path \
+            --set postgresql.backup.endpointURL=https://s3.example.com \
+            --set postgresql.backup.s3CredentialsSecretRef.name=x \
+            --set postgresql.backup.s3CredentialsSecretRef.accessKeyIdKey=access-key \
+            --set postgresql.backup.s3CredentialsSecretRef.secretAccessKeyKey=secret-key > /dev/null
+
+  e2e-cluster:
+    runs-on: ubuntu-latest
+    needs: [backend-test, frontend-test, helm-lint]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.1"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: helm/kind-action@v1
+        with:
+          install_only: true
+      - uses: azure/setup-helm@v4
+      - name: Bring up the devcluster environment
+        run: go run ./test/e2e/cmd/devcluster up
+      - name: Run Ginkgo cluster e2e suite
+        run: go test -tags e2e ./test/e2e/... -v -timeout 30m
+      - name: Run Playwright frontend e2e suite against the live environment
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          E2E_BASE_URL=$(go run ../test/e2e/cmd/devcluster baseurl) \
+          E2E_DEX_ADDR=$(go run ../test/e2e/cmd/devcluster dexaddr) \
+          npm run test:e2e
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+      - name: Tear down the devcluster environment
+        if: always()
+        run: go run ./test/e2e/cmd/devcluster down --delete-cluster
