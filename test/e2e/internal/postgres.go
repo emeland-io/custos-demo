@@ -10,7 +10,7 @@ import (
 const TestNamespace = "notebook-e2e"
 
 func ApplyManifest(ctx context.Context, manifest string) error {
-	cmd := exec.CommandContext(ctx, "kubectl", "apply", "-f", "-")
+	cmd := exec.CommandContext(ctx, "kubectl", "--context", KindContextName, "apply", "-f", "-")
 	cmd.Stdin = strings.NewReader(manifest)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("applying manifest: %w", err)

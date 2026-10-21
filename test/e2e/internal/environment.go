@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -76,6 +77,17 @@ func Up(ctx context.Context) error {
 		return fmt.Errorf("waiting for chart's Postgres Cluster: %w", err)
 	}
 
+	// A prior `up`'s port-forwards may still be running and holding
+	// these local ports — e.g. because this `up` reinstalled Dex (its
+	// pod restarts on every run), which kills the old forward's
+	// target but not the forward process itself. Left alone,
+	// WaitForTCPPort below would see the OLD forward's listener still
+	// answering, StartPortForward would return the NEW (already-dead
+	// or doomed) process's PID, and SaveState would overwrite the only
+	// record of the still-running old one — orphaning it, and leaving
+	// `down` nothing to stop.
+	stopPriorPortForwards(ctx)
+
 	pid, err := StartPortForward(ctx)
 	if err != nil {
 		return fmt.Errorf("starting port-forward: %w", err)
@@ -94,34 +106,52 @@ func Up(ctx context.Context) error {
 	})
 }
 
+// stopPriorPortForwards best-effort stops any port-forward processes
+// recorded in an existing state file. A missing or unreadable state
+// file means there's nothing to stop — that's the ordinary case on a
+// genuinely fresh `up`, not an error.
+func stopPriorPortForwards(ctx context.Context) {
+	state, err := LoadState()
+	if err != nil {
+		return
+	}
+	if state.PortForwardPID != 0 {
+		_ = StopPortForward(state.PortForwardPID)
+	}
+	if state.DexPortForwardPID != 0 {
+		_ = StopPortForward(state.DexPortForwardPID)
+	}
+}
+
 // Down tears down the test namespace (Dex, the chart release, the
 // CNPG Cluster it created) in reverse order, stopping the port-forward
 // first. It leaves cert-manager, the ingress controller, the
 // Prometheus Operator, the CNPG operator, and the kind cluster itself
-// running, unless deleteCluster is true.
+// running, unless deleteCluster is true. Every step runs even if an
+// earlier one failed — e.g. `up` having died partway through a prior
+// run, or the cluster being unreachable — and all failures are
+// reported together, so a broken environment doesn't block Down from
+// cleaning up everything it still can.
 func Down(ctx context.Context, deleteCluster bool) error {
-	state, err := LoadState()
-	if err == nil {
-		if state.PortForwardPID != 0 {
-			_ = StopPortForward(state.PortForwardPID)
-		}
-		if state.DexPortForwardPID != 0 {
-			_ = StopPortForward(state.DexPortForwardPID)
-		}
-	}
+	stopPriorPortForwards(ctx)
 
+	var errs []error
 	if err := runHelmUninstall(ctx, ReleaseName, TestNamespace); err != nil {
-		return fmt.Errorf("uninstalling chart: %w", err)
+		errs = append(errs, fmt.Errorf("uninstalling chart: %w", err))
 	}
 	if err := runKubectlDelete(ctx, "namespace", TestNamespace); err != nil {
-		return fmt.Errorf("deleting test namespace: %w", err)
+		errs = append(errs, fmt.Errorf("deleting test namespace: %w", err))
 	}
 
 	if deleteCluster {
 		if err := DeleteCluster(ctx, KindClusterName); err != nil {
-			return fmt.Errorf("deleting kind cluster: %w", err)
+			errs = append(errs, fmt.Errorf("deleting kind cluster: %w", err))
 		}
 	}
 
-	return ClearState()
+	if err := ClearState(); err != nil {
+		errs = append(errs, fmt.Errorf("clearing state: %w", err))
+	}
+
+	return errors.Join(errs...)
 }

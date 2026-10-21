@@ -5,14 +5,21 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 const (
 	TestAdminEmail = "admin@notebook.test"
 	TestUserEmail  = "user@notebook.test"
 	TestPassword   = "notebook-e2e-password"
+
+	// testPasswordHash is bcrypt.GenerateFromPassword(TestPassword,
+	// bcrypt.DefaultCost), precomputed. A fixed constant rather than
+	// hashing at render time keeps RenderDexConfig deterministic:
+	// bcrypt salts randomly, so hashing on every call would make the
+	// rendered config (and so its checksum/config annotation) differ
+	// on every `up` even when nothing meaningful changed, forcing Dex
+	// to restart every run instead of only when its actual inputs do.
+	testPasswordHash = "$2a$10$sORM/nDCrb5JcWOniTAhbe9L1CVVMRnOsoKMfjkQZmUE5oImJVVIi"
 )
 
 type DexConfig struct {
@@ -49,14 +56,10 @@ staticPasswords:
 `
 
 func RenderDexConfig(cfg DexConfig) (string, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(TestPassword), bcrypt.DefaultCost)
-	if err != nil {
-		return "", fmt.Errorf("hashing test password: %w", err)
-	}
 	return fmt.Sprintf(dexConfigTemplate,
 		cfg.Issuer, cfg.ClientID, cfg.ClientID, cfg.ClientSecret, cfg.RedirectURL,
-		TestAdminEmail, string(hash),
-		TestUserEmail, string(hash),
+		TestAdminEmail, testPasswordHash,
+		TestUserEmail, testPasswordHash,
 	), nil
 }
 

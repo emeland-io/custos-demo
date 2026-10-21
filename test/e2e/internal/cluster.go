@@ -9,6 +9,18 @@ import (
 
 const KindClusterName = "notebook-e2e"
 
+// KindContextName is the kubeconfig context kind names its cluster
+// ("kind-<cluster-name>"). Every kubectl/helm call below must pin
+// this explicitly: otherwise up/down act on whatever context the
+// caller's kubeconfig *currently* points at, which — unlike kind
+// itself switching context on first `kind create` — is never
+// re-selected on a later run that skips creation because the cluster
+// already exists. A developer who has since switched kubeconfig
+// context to a shared or production cluster and reruns `devcluster
+// up` would otherwise install cert-manager, ingress-nginx,
+// kube-prometheus-stack, CNPG and the app into THAT cluster.
+const KindContextName = "kind-" + KindClusterName
+
 type ClusterLister interface {
 	ListClusters(ctx context.Context) ([]string, error)
 }

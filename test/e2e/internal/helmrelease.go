@@ -24,7 +24,13 @@ type ReleaseLister interface {
 type helmReleaseLister struct{}
 
 func (helmReleaseLister) ListReleases(ctx context.Context, namespace string) ([]string, error) {
-	out, err := exec.CommandContext(ctx, "helm", "list", "-n", namespace, "-q").Output()
+	// --deployed: a release stuck in "failed" or "pending-install"
+	// status (e.g. from a prior `up` that timed out mid-install) must
+	// not be treated as already installed, or EnsureHelmRelease skips
+	// it forever instead of retrying — breaking the "up run twice
+	// without a down" idempotency the plan's Review Focus requires.
+	out, err := exec.CommandContext(ctx, "helm", "--kube-context", KindContextName,
+		"list", "-n", namespace, "-q", "--deployed").Output()
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +72,7 @@ func EnsureHelmRelease(ctx context.Context, lister ReleaseLister, rel HelmReleas
 		}
 	}
 
-	args := []string{"upgrade", "--install", rel.Name, rel.Chart, "-n", rel.Namespace, "--create-namespace", "--wait"}
+	args := []string{"--kube-context", KindContextName, "upgrade", "--install", rel.Name, rel.Chart, "-n", rel.Namespace, "--create-namespace", "--wait"}
 	if rel.Version != "" {
 		args = append(args, "--version", rel.Version)
 	}

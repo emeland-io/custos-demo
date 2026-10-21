@@ -9,6 +9,35 @@ import (
 	"notebook/test/e2e/internal"
 )
 
+// RenderDexManifests' checksum/config annotation only forces a
+// rollout when the config actually changed (see
+// TestRenderDexManifests_DeploymentChecksumAnnotationChangesWithConfig
+// above) — but bcrypt.GenerateFromPassword salts randomly, so if
+// RenderDexConfig re-hashed TestPassword on every call, the rendered
+// config (and so the checksum) would differ on every `up`, even when
+// nothing meaningful changed, forcing Dex to restart every run
+// instead of only when its actual inputs change.
+func TestRenderDexConfig_IsDeterministicAcrossCalls(t *testing.T) {
+	cfg := internal.DexConfig{
+		Issuer:       "http://dex.notebook-e2e.svc.cluster.local:5556",
+		ClientID:     "notebook",
+		ClientSecret: "notebook-secret",
+		RedirectURL:  "http://notebook.notebook-e2e.svc.cluster.local/auth/callback",
+	}
+
+	first, err := internal.RenderDexConfig(cfg)
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	second, err := internal.RenderDexConfig(cfg)
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	if first != second {
+		t.Fatalf("expected RenderDexConfig to be deterministic for the same input, got two different renders")
+	}
+}
+
 func TestRenderDexConfig_ProducesValidYAMLWithWorkingPasswordHash(t *testing.T) {
 	cfg := internal.DexConfig{
 		Issuer:       "http://dex.notebook-e2e.svc.cluster.local:5556",

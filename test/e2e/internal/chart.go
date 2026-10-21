@@ -126,7 +126,7 @@ func ChooseSecretValue(existing string, exists bool, generate func() (string, er
 // are present at all rather than treating "not found" as an error —
 // that's the expected, idempotent case on a genuinely fresh `up`.
 func readSecretKey(ctx context.Context, secretName, key string) (value string, exists bool, err error) {
-	out, err := exec.CommandContext(ctx, "kubectl", "get", "secret", secretName,
+	out, err := exec.CommandContext(ctx, "kubectl", "--context", KindContextName, "get", "secret", secretName,
 		"-n", TestNamespace, "-o", fmt.Sprintf("jsonpath={.data.%s}", key)).Output()
 	if err != nil || len(out) == 0 {
 		return "", false, nil
@@ -181,6 +181,7 @@ data:
 func InstallChart(ctx context.Context, imageTag string, dex DexConfig) error {
 	repo, tag := SplitImageTag(imageTag)
 	args := []string{
+		"--kube-context", KindContextName,
 		"upgrade", "--install", ReleaseName, "deploy/helm/notebook",
 		"-n", TestNamespace, "--create-namespace", "--wait", "--timeout", "8m",
 		"--set", "image.repository=" + repo,
@@ -211,7 +212,7 @@ func InstallChart(ctx context.Context, imageTag string, dex DexConfig) error {
 }
 
 func startPortForward(service, portMapping, localAddr string) (int, error) {
-	cmd := exec.Command("kubectl", "port-forward", "-n", TestNamespace, service, portMapping)
+	cmd := exec.Command("kubectl", "--context", KindContextName, "port-forward", "-n", TestNamespace, service, portMapping)
 	if err := cmd.Start(); err != nil {
 		return 0, fmt.Errorf("starting port-forward to %s: %w", service, err)
 	}

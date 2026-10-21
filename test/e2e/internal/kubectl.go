@@ -7,7 +7,8 @@ import (
 )
 
 func RolloutWait(ctx context.Context, namespace, resource string) error {
-	cmd := exec.CommandContext(ctx, "kubectl", "rollout", "status", resource, "-n", namespace, "--timeout=3m")
+	cmd := exec.CommandContext(ctx, "kubectl", "--context", KindContextName,
+		"rollout", "status", resource, "-n", namespace, "--timeout=3m")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("waiting for %s rollout in %s: %w", resource, namespace, err)
 	}
@@ -20,8 +21,8 @@ func RolloutWait(ctx context.Context, namespace, resource string) error {
 // this is a defensive readiness gate run after the chart install that
 // creates the Cluster.
 func WaitForClusterReady(ctx context.Context, namespace, name string) error {
-	cmd := exec.CommandContext(ctx, "kubectl", "wait", "--for=condition=Ready",
-		"cluster/"+name, "-n", namespace, "--timeout=5m")
+	cmd := exec.CommandContext(ctx, "kubectl", "--context", KindContextName,
+		"wait", "--for=condition=Ready", "cluster/"+name, "-n", namespace, "--timeout=5m")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("waiting for cluster/%s to become ready in %s: %w", name, namespace, err)
 	}
@@ -29,11 +30,13 @@ func WaitForClusterReady(ctx context.Context, namespace, name string) error {
 }
 
 func runHelmUninstall(ctx context.Context, release, namespace string) error {
-	cmd := exec.CommandContext(ctx, "helm", "uninstall", release, "-n", namespace, "--ignore-not-found")
+	cmd := exec.CommandContext(ctx, "helm", "--kube-context", KindContextName,
+		"uninstall", release, "-n", namespace, "--ignore-not-found")
 	return cmd.Run()
 }
 
 func runKubectlDelete(ctx context.Context, kind, name string) error {
-	cmd := exec.CommandContext(ctx, "kubectl", "delete", kind, name, "--ignore-not-found", "--wait")
+	cmd := exec.CommandContext(ctx, "kubectl", "--context", KindContextName,
+		"delete", kind, name, "--ignore-not-found", "--wait")
 	return cmd.Run()
 }
