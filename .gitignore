@@ -1,2 +1,5 @@
 internal/webassets/dist/*
 !internal/webassets/dist/README.txt
+.claude/worktrees/
+.superpowers/
+.devcluster-state.json
