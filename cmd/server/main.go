@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log/slog"
 	"net/http"
 
@@ -25,6 +26,9 @@ func main() {
 		return
 	}
 
+	migrateOnly := flag.Bool("migrate-only", false, "run database migrations then exit")
+	flag.Parse()
+
 	pool, err := db.Connect(ctx, cfg.DatabaseURL)
 	if err != nil {
 		logger.Error("failed to connect to database", slog.String("error", err.Error()))
@@ -34,6 +38,11 @@ func main() {
 
 	if err := migrations.Up(ctx, pool); err != nil {
 		logger.Error("failed to run migrations", slog.String("error", err.Error()))
+		return
+	}
+
+	if *migrateOnly {
+		logger.Info("migrations applied, exiting due to --migrate-only")
 		return
 	}
 
