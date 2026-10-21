@@ -1,0 +1,27 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "notebook.fullname" . }}-postgres
+  labels:
+    {{- include "notebook.labels" . | nindent 4 }}
+spec:
+  instances: {{ .Values.postgresql.instances }}
+  storage:
+    size: {{ .Values.postgresql.storageSize }}
+  bootstrap:
+    initdb:
+      database: notebook
+      owner: notebook
+  {{- if .Values.postgresql.backup.enabled }}
+  backup:
+    barmanObjectStore:
+      destinationPath: {{ required "postgresql.backup.destinationPath is required when postgresql.backup.enabled is true" .Values.postgresql.backup.destinationPath | quote }}
+      endpointURL: {{ required "postgresql.backup.endpointURL is required when postgresql.backup.enabled is true" .Values.postgresql.backup.endpointURL | quote }}
+      s3Credentials:
+        accessKeyId:
+          name: {{ required "postgresql.backup.s3CredentialsSecretRef.name is required when postgresql.backup.enabled is true" .Values.postgresql.backup.s3CredentialsSecretRef.name }}
+          key: {{ required "postgresql.backup.s3CredentialsSecretRef.accessKeyIdKey is required when postgresql.backup.enabled is true" .Values.postgresql.backup.s3CredentialsSecretRef.accessKeyIdKey }}
+        secretAccessKey:
+          name: {{ .Values.postgresql.backup.s3CredentialsSecretRef.name }}
+          key: {{ required "postgresql.backup.s3CredentialsSecretRef.secretAccessKeyKey is required when postgresql.backup.enabled is true" .Values.postgresql.backup.s3CredentialsSecretRef.secretAccessKeyKey }}
+  {{- end }}
