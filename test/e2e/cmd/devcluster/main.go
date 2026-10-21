@@ -43,6 +43,13 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Println(state.BaseURL)
+	case "dexaddr":
+		state, err := internal.LoadState()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "no environment is up:", err)
+			os.Exit(1)
+		}
+		fmt.Println(state.DexLocalAddr)
 	default:
 		usage()
 		os.Exit(1)
@@ -50,5 +57,5 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: devcluster <up|down [--delete-cluster]|baseurl>")
+	fmt.Fprintln(os.Stderr, "usage: devcluster <up|down [--delete-cluster]|baseurl|dexaddr>")
 }

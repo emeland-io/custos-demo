@@ -3,9 +3,10 @@ package internal
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 )
 
-const stateFilePath = ".devcluster-state.json"
+const stateFileName = ".devcluster-state.json"
 
 type State struct {
 	BaseURL           string `json:"base_url"`
@@ -15,17 +16,38 @@ type State struct {
 	DexPortForwardPID int    `json:"dex_port_forward_pid"`
 }
 
+// stateFilePath anchors the state file to the repo root rather than
+// the calling process's cwd: this plan's own workflow runs `up` from
+// the repo root but `baseurl`/`dexaddr` from frontend/ (see Task 9's
+// Playwright run), so a cwd-relative path would silently miss what
+// `up` wrote.
+func stateFilePath() (string, error) {
+	root, err := RepoRoot()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, stateFileName), nil
+}
+
 func SaveState(s State) error {
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(stateFilePath, data, 0o600)
+	path, err := stateFilePath()
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
 }
 
 func LoadState() (State, error) {
 	var s State
-	data, err := os.ReadFile(stateFilePath)
+	path, err := stateFilePath()
+	if err != nil {
+		return s, err
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return s, err
 	}
@@ -34,7 +56,11 @@ func LoadState() (State, error) {
 }
 
 func ClearState() error {
-	err := os.Remove(stateFilePath)
+	path, err := stateFilePath()
+	if err != nil {
+		return err
+	}
+	err = os.Remove(path)
 	if os.IsNotExist(err) {
 		return nil
 	}

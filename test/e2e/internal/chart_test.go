@@ -54,6 +54,46 @@ func TestWaitForTCPPort_ReturnsOnceSomethingListens(t *testing.T) {
 	}
 }
 
+// Up() must be idempotent when re-run without a Down in between (the
+// plan's own Review Focus calls this out explicitly). Dex's config
+// and the app's OIDC/session Secrets both embed randomly generated
+// values (client secret, hash/block keys); regenerating fresh values
+// on every run desyncs Dex (which restarts to pick up its new config,
+// via the checksum/config annotation) from the app Deployment (which
+// never restarts just because a Secret it mounts via secretKeyRef
+// changed), causing Dex to reject the app's now-stale client secret
+// ("invalid client_secret on token request"). chooseSecretValue is
+// the pure decision — reuse what's already there, generate only when
+// nothing exists yet — that EnsureAppSecrets' live kubectl lookups
+// build on.
+func TestChooseSecretValue_ReusesExistingWhenPresent(t *testing.T) {
+	calls := 0
+	generate := func() (string, error) { calls++; return "freshly-generated", nil }
+
+	got, err := internal.ChooseSecretValue("already-there", true, generate)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "already-there" {
+		t.Fatalf("expected to reuse the existing value, got %q", got)
+	}
+	if calls != 0 {
+		t.Fatalf("expected generate not to be called when a value already exists, called %d times", calls)
+	}
+}
+
+func TestChooseSecretValue_GeneratesWhenAbsent(t *testing.T) {
+	generate := func() (string, error) { return "freshly-generated", nil }
+
+	got, err := internal.ChooseSecretValue("", false, generate)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "freshly-generated" {
+		t.Fatalf("expected the generated value, got %q", got)
+	}
+}
+
 func TestWaitForTCPPort_TimesOutWhenNothingListens(t *testing.T) {
 	// Port 0 is never a real listening address, so dialing it always
 	// fails fast — this proves the function returns an error rather

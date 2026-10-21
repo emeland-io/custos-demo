@@ -96,9 +96,59 @@ func randomHex(byteLen int) (string, error) {
 }
 
 // GenerateDexClientSecret and GenerateSessionKeys produce fresh random
-// values every `up`; nothing here is ever committed.
+// values; nothing here is ever committed. Callers only use these when
+// ChooseSecretValue determines nothing already exists — see its doc
+// comment for why regenerating unconditionally on every `up` breaks
+// re-runs without a `down` in between.
 func GenerateDexClientSecret() (string, error) { return randomHex(16) }
 func GenerateSessionKey() (string, error)      { return randomHex(16) }
+
+// ChooseSecretValue reuses an already-existing secret value instead
+// of generating a new one. Dex restarts on every `up` to pick up its
+// rendered config (see the checksum/config annotation in dex.go), but
+// the app Deployment never restarts just because a Secret it mounts
+// via secretKeyRef changed its value — env vars from secretKeyRef are
+// captured once, at pod start. Regenerating the Dex client secret (or
+// the session hash/block keys) on every `up` therefore desyncs Dex's
+// freshly-rotated secret from the app's still-stale one, and Dex
+// starts rejecting the app's token requests outright. Reusing
+// whatever is already there keeps repeated `up` runs idempotent, as
+// the plan's Review Focus requires.
+func ChooseSecretValue(existing string, exists bool, generate func() (string, error)) (string, error) {
+	if exists {
+		return existing, nil
+	}
+	return generate()
+}
+
+// readSecretKey reads one base64-decoded data key from an existing
+// Secret, reporting (via exists) whether the Secret (and that key)
+// are present at all rather than treating "not found" as an error —
+// that's the expected, idempotent case on a genuinely fresh `up`.
+func readSecretKey(ctx context.Context, secretName, key string) (value string, exists bool, err error) {
+	out, err := exec.CommandContext(ctx, "kubectl", "get", "secret", secretName,
+		"-n", TestNamespace, "-o", fmt.Sprintf("jsonpath={.data.%s}", key)).Output()
+	if err != nil || len(out) == 0 {
+		return "", false, nil
+	}
+	decoded, err := base64.StdEncoding.DecodeString(string(out))
+	if err != nil {
+		return "", false, fmt.Errorf("decoding existing secret %s/%s: %w", secretName, key, err)
+	}
+	return string(decoded), true, nil
+}
+
+// getOrGenerateSecret combines readSecretKey with ChooseSecretValue:
+// reuse the existing value in secretName's key if the Secret is
+// already there, otherwise call generate (GenerateDexClientSecret or
+// GenerateSessionKey).
+func getOrGenerateSecret(ctx context.Context, secretName, key string, generate func() (string, error)) (string, error) {
+	existing, exists, err := readSecretKey(ctx, secretName, key)
+	if err != nil {
+		return "", err
+	}
+	return ChooseSecretValue(existing, exists, generate)
+}
 
 func EnsureAppSecrets(ctx context.Context, dex DexConfig, sessionHashKey, sessionBlockKey []byte) error {
 	manifest := fmt.Sprintf(`

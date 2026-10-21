@@ -31,9 +31,14 @@ func Up(ctx context.Context) error {
 		return fmt.Errorf("ensuring test namespace: %w", err)
 	}
 
-	clientSecret, err := GenerateDexClientSecret()
+	// Reuse whatever secret values are already there rather than
+	// regenerating on every `up`: see ChooseSecretValue's doc comment
+	// for why that desyncs Dex (which restarts on config changes) from
+	// the app Deployment (which doesn't restart just because a Secret
+	// it mounts changed value).
+	clientSecret, err := getOrGenerateSecret(ctx, "notebook-e2e-oidc", "client-secret", GenerateDexClientSecret)
 	if err != nil {
-		return fmt.Errorf("generating Dex client secret: %w", err)
+		return fmt.Errorf("choosing Dex client secret: %w", err)
 	}
 	dex := DexConfig{
 		Issuer:       dexIssuer,
@@ -45,13 +50,13 @@ func Up(ctx context.Context) error {
 		return fmt.Errorf("ensuring Dex: %w", err)
 	}
 
-	hashKey, err := GenerateSessionKey()
+	hashKey, err := getOrGenerateSecret(ctx, "notebook-e2e-session", "hash-key", GenerateSessionKey)
 	if err != nil {
-		return fmt.Errorf("generating session hash key: %w", err)
+		return fmt.Errorf("choosing session hash key: %w", err)
 	}
-	blockKey, err := GenerateSessionKey()
+	blockKey, err := getOrGenerateSecret(ctx, "notebook-e2e-session", "block-key", GenerateSessionKey)
 	if err != nil {
-		return fmt.Errorf("generating session block key: %w", err)
+		return fmt.Errorf("choosing session block key: %w", err)
 	}
 	if err := EnsureAppSecrets(ctx, dex, []byte(hashKey), []byte(blockKey)); err != nil {
 		return fmt.Errorf("ensuring app secrets: %w", err)
