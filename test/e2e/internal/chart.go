@@ -6,10 +6,42 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 )
+
+// WaitForTCPPort blocks until addr accepts a TCP connection or
+// timeout elapses.
+func WaitForTCPPort(addr string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("timed out waiting for %s to accept connections", addr)
+}
+
+// RepoRoot returns the directory containing this module's go.mod.
+// BuildAndLoadImage and InstallChart need it as an explicit exec.Cmd
+// Dir: a Ginkgo suite invoked via `go test ./test/e2e/...` runs with
+// its working directory set to the test/e2e package directory, not
+// the repo root, so relative paths like "." (docker build context) or
+// "deploy/helm/notebook" (the chart) cannot rely on the caller's cwd.
+func RepoRoot() (string, error) {
+	out, err := exec.Command("go", "env", "GOMOD").Output()
+	if err != nil {
+		return "", fmt.Errorf("determining repo root via go env GOMOD: %w", err)
+	}
+	return filepath.Dir(strings.TrimSpace(string(out))), nil
+}
 
 // ReleaseName is the Helm release name used for the app chart in the
 // e2e environment. It feeds notebook.fullname (ReleaseName + "-notebook")
@@ -40,7 +72,13 @@ func SplitImageTag(full string) (repo, tag string) {
 }
 
 func BuildAndLoadImage(ctx context.Context, tag string) error {
-	if err := exec.CommandContext(ctx, "docker", "build", "-t", tag, ".").Run(); err != nil {
+	root, err := RepoRoot()
+	if err != nil {
+		return err
+	}
+	build := exec.CommandContext(ctx, "docker", "build", "-t", tag, ".")
+	build.Dir = root
+	if err := build.Run(); err != nil {
 		return fmt.Errorf("building image %s: %w", tag, err)
 	}
 	if err := exec.CommandContext(ctx, "kind", "load", "docker-image", tag, "--name", KindClusterName).Run(); err != nil {
@@ -110,18 +148,47 @@ func InstallChart(ctx context.Context, imageTag string, dex DexConfig) error {
 		"--set", "session.hashKeySecretRef.name=notebook-e2e-session",
 		"--set", "session.blockKeySecretRef.name=notebook-e2e-session",
 	}
-	if err := exec.CommandContext(ctx, "helm", args...).Run(); err != nil {
+	root, err := RepoRoot()
+	if err != nil {
+		return err
+	}
+	install := exec.CommandContext(ctx, "helm", args...)
+	install.Dir = root
+	if err := install.Run(); err != nil {
 		return fmt.Errorf("installing notebook chart: %w", err)
 	}
 	return nil
 }
 
-func StartPortForward(ctx context.Context) (int, error) {
-	cmd := exec.Command("kubectl", "port-forward", "-n", TestNamespace, "svc/notebook-e2e-notebook", "18080:8080")
+func startPortForward(service, portMapping, localAddr string) (int, error) {
+	cmd := exec.Command("kubectl", "port-forward", "-n", TestNamespace, service, portMapping)
 	if err := cmd.Start(); err != nil {
-		return 0, fmt.Errorf("starting port-forward: %w", err)
+		return 0, fmt.Errorf("starting port-forward to %s: %w", service, err)
+	}
+	// cmd.Start returning only means the kubectl process has been
+	// forked; the tunnel itself takes a moment longer to actually
+	// accept connections, and a caller that proceeds immediately can
+	// race it and see "connection refused" on its first request.
+	if err := WaitForTCPPort(localAddr, 30*time.Second); err != nil {
+		_ = cmd.Process.Kill()
+		return 0, fmt.Errorf("port-forward to %s never became reachable: %w", service, err)
 	}
 	return cmd.Process.Pid, nil
+}
+
+func StartPortForward(ctx context.Context) (int, error) {
+	return startPortForward("svc/notebook-e2e-notebook", "18080:8080", "127.0.0.1:18080")
+}
+
+// StartDexPortForward forwards Dex's Service to a fixed local port,
+// so a client running outside the cluster (NewCookieClient's caller,
+// or Playwright's browser) can reach Dex's authorization endpoint —
+// whose URL otherwise names a hostname that only resolves inside the
+// cluster's own DNS.
+func StartDexPortForward(ctx context.Context) (pid int, localAddr string, err error) {
+	const addr = "127.0.0.1:15556"
+	pid, err = startPortForward("svc/dex", "15556:5556", addr)
+	return pid, addr, err
 }
 
 func StopPortForward(pid int) error {

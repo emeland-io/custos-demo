@@ -75,8 +75,18 @@ func Up(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("starting port-forward: %w", err)
 	}
+	dexPID, dexLocalAddr, err := StartDexPortForward(ctx)
+	if err != nil {
+		return fmt.Errorf("starting Dex port-forward: %w", err)
+	}
 
-	return SaveState(State{BaseURL: appBaseURL, DexIssuer: dexIssuer, PortForwardPID: pid})
+	return SaveState(State{
+		BaseURL:           appBaseURL,
+		DexIssuer:         dexIssuer,
+		DexLocalAddr:      dexLocalAddr,
+		PortForwardPID:    pid,
+		DexPortForwardPID: dexPID,
+	})
 }
 
 // Down tears down the test namespace (Dex, the chart release, the
@@ -86,8 +96,13 @@ func Up(ctx context.Context) error {
 // running, unless deleteCluster is true.
 func Down(ctx context.Context, deleteCluster bool) error {
 	state, err := LoadState()
-	if err == nil && state.PortForwardPID != 0 {
-		_ = StopPortForward(state.PortForwardPID)
+	if err == nil {
+		if state.PortForwardPID != 0 {
+			_ = StopPortForward(state.PortForwardPID)
+		}
+		if state.DexPortForwardPID != 0 {
+			_ = StopPortForward(state.DexPortForwardPID)
+		}
 	}
 
 	if err := runHelmUninstall(ctx, ReleaseName, TestNamespace); err != nil {

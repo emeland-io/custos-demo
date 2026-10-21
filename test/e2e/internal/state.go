@@ -8,9 +8,11 @@ import (
 const stateFilePath = ".devcluster-state.json"
 
 type State struct {
-	BaseURL        string `json:"base_url"`
-	DexIssuer      string `json:"dex_issuer"`
-	PortForwardPID int    `json:"port_forward_pid"`
+	BaseURL           string `json:"base_url"`
+	DexIssuer         string `json:"dex_issuer"`
+	DexLocalAddr      string `json:"dex_local_addr"`
+	PortForwardPID    int    `json:"port_forward_pid"`
+	DexPortForwardPID int    `json:"dex_port_forward_pid"`
 }
 
 func SaveState(s State) error {
