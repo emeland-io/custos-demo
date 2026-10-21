@@ -20,7 +20,7 @@ plan's execution starts.
 | 2 | [OIDC/BFF authentication](plans/2026-10-19-notebook-oidc-auth.md) | **Done** | Merged to `main`. Real OIDC Authorization Code + PKCE flow (BFF pattern), encrypted session + flow cookies, claim-to-role mapping, session middleware replacing Plan 1's stub. |
 | 3 | [Vue frontend](plans/2026-10-19-notebook-frontend.md) | **Done** | Note list/detail/editor panes, Pinia stores, `/api/me` addition. |
 | 4 | [Container build & static asset embedding](plans/2026-10-19-notebook-container-build.md) | **Done** | `embed.FS` + SPA fallback, multi-stage Dockerfile, local dev compose. |
-| 5 | [Helm chart & Kubernetes deployment](plans/2026-10-19-notebook-helm-chart.md) | Not started | Chart, CloudNativePG `Cluster`, migration Job, values/README. |
+| 5 | [Helm chart & Kubernetes deployment](plans/2026-10-19-notebook-helm-chart.md) | **Done** | Merged to `main`. Chart, CloudNativePG `Cluster`, pre-upgrade migration Job + `--migrate-only` flag, PodMonitor, dev/prod values, README. |
 | 6 | [E2E test framework & CI](plans/2026-10-19-notebook-e2e-ci.md) | Not started | kind+Dex+Ginkgo cluster suite, Playwright frontend suite, GitHub Actions wiring. |
 
 ## Phase 1 — completed detail
@@ -273,21 +273,81 @@ literal text, each ledgered with cost-if-wrong at the time):
   the frontend's error handling actually depends on. Cost if wrong:
   would need either a mux upgrade or a hand-rolled method-matching
   shim.
-- **Not yet merged to `main`:** this phase was implemented in an
-  isolated worktree per explicit instruction, unlike Phase 3 (built
-  directly on `main`). The human partner has not yet been asked to
-  choose a merge strategy (`superpowers:finishing-a-development-branch`)
-  — doing so, and reconciling the worktree's plain README/`.gitignore`
-  with `main`'s pre-existing uncommitted versions of both files (richer
-  README content, different `.gitignore` rule), remains open.
+- **Merged to `main`** in a later session, by fast-forward, before Phase
+  5 execution began (resolving the open question above).
+
+## Phase 5 — completed detail
+
+**Branch:** `worktree-notebook-plan-5-helm-chart`, built in an isolated
+worktree at `.claude/worktrees/notebook-plan-5-helm-chart` (merged to
+`main` by fast-forward, worktree and branch removed after merge).
+
+**Commits merged (7):** 6 task commits (`e3225ee` chart skeleton/values/
+helpers, `38780d3` Deployment/Service/Ingress, `ca8656c` CNPG Cluster,
+`ad6e26b` migration Job + `--migrate-only` flag, `6566aea` PodMonitor +
+helm test, `10526b8` values-dev/values-prod/README) plus 1 fix-pass
+commit (`15b83b0`) from the final whole-branch review.
+
+**Handoff verification (required before execution started):** re-read
+Plan 5's Handoff Note against the actual Plan 1-4 codebase — `/healthz`
+and `/metrics` both wired in `internal/api/router.go`, all 9 env var
+names in `internal/config/config.go` matched exactly, `cmd/server/
+main.go` listens on `:8080`, and `migrations.Up(ctx, pool)`'s signature
+matched Task 4's assumption. No drift found.
+
+**Final review:** fresh reviewer (Opus, general-purpose subagent).
+Verdict: "Ready to merge: With fixes." 1 Critical + 3 Important findings
+fixed (re-reviewed clean, full suite + `helm lint`/`helm template` green
+before merge); several Minor findings deferred as non-blocking.
+
+**Fixed before merge:**
+- Critical: the migration Job's `helm.sh/hook` annotation was
+  `pre-upgrade,pre-install`; on a fresh install this runs the Job before
+  the CNPG `Cluster` exists, so the DB credentials secret the README
+  tells users to reference doesn't exist yet — the install would hang
+  until Helm's hook timeout. Fixed by dropping `pre-install` (kept
+  `pre-upgrade` only), since `cmd/server/main.go` already runs
+  migrations unconditionally on every process start, making the Job's
+  install-time role redundant anyway.
+- Important: every error path in `cmd/server/main.go`'s `main()` did
+  `logger.Error(...); return`, exiting 0 even on failure — under
+  `--migrate-only` a failed migration still reported Job success, and
+  `hook-succeeded` deleted the evidence. Fixed by extracting a
+  `run() error` and calling `os.Exit(1)` in `main()` on any error.
+- Important: the chart README's `openssl rand -hex 32` instruction for
+  `SESSION_BLOCK_KEY` produces a 64-character value, but `config.Load()`
+  requires exactly 16/24/32 characters — fixed to `-hex 16` for the
+  block key (32 chars), keeping `-hex 32` for the hash key (which only
+  needs >=32).
+- Important: the README's install example and "Required secrets" prose
+  named the CNPG-generated secret `notebook-postgres-app`; the actual
+  name (given the Cluster's `{{ fullname }}-postgres` naming and
+  `notebook.fullname` = `{{ .Release.Name }}-notebook`) is
+  `notebook-notebook-postgres-app` for a release named `notebook` — both
+  references corrected.
+
+**Rulings made during implementation** (deviations from the plan's
+literal text, each ledgered with cost-if-wrong at the time):
+- Task 1's plan text promises a `notebook.secretRefEnv` helper in its
+  "Interfaces" line that the plan's own literal Step 3 code never
+  defines and no downstream task (verified against Tasks 2 and 4's full
+  text) ever calls. Ruled a stale/aspirational plan-documentation
+  inconsistency, not a real gap — did not implement it. Cost if wrong:
+  a 3-line helper addition, trivial.
+- The Critical finding above conflicts with Task 4's literal plan text
+  (`"helm.sh/hook": pre-upgrade,pre-install`). Ruled to drop
+  `pre-install` rather than add a wait-for-DB readiness mechanism, since
+  the app already self-migrates on every startup. Cost if wrong: a
+  one-line annotation revert.
 
 ## Next up
 
-Plan 5 (Helm chart & Kubernetes deployment) is next. Its handoff note
-requires confirming this phase's image exposes port `8080`, serves
-`/healthz` for liveness/readiness probes, serves `/metrics` for
-Prometheus scraping, and reads all configuration exclusively from
-environment variables (no config file, no flags) before execution
-begins — all true as built. Resolving Phase 4's merge-to-`main`
-question (see "Rulings" above) should happen first, since Plan 5 will
-assume this phase's Dockerfile/image exist on `main`.
+Plan 6 (E2E test framework & CI) is next. Its handoff note (once read
+against this phase's actual outcome) will need to account for: the chart
+living at `deploy/helm/notebook`, the migration Job's hook phase being
+`pre-upgrade` only (not `pre-upgrade,pre-install` as Plan 5's original
+text specified), the Job being named `<fullname>-migrate-<revision>`,
+and `--migrate-only` being the exact flag name added to `cmd/server/
+main.go`. Per Plan 5's own handoff note, **the reviewer who signed off
+on this phase's final review must read Plan 6 against what was actually
+built** before Plan 6 execution begins.
