@@ -2,6 +2,8 @@ package internal
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 
 	"golang.org/x/crypto/bcrypt"
@@ -30,6 +32,7 @@ oauth2:
   skipApprovalScreen: true
 staticClients:
   - id: %s
+    name: %s
     secret: %s
     redirectURIs:
       - %s
@@ -51,7 +54,7 @@ func RenderDexConfig(cfg DexConfig) (string, error) {
 		return "", fmt.Errorf("hashing test password: %w", err)
 	}
 	return fmt.Sprintf(dexConfigTemplate,
-		cfg.Issuer, cfg.ClientID, cfg.ClientSecret, cfg.RedirectURL,
+		cfg.Issuer, cfg.ClientID, cfg.ClientID, cfg.ClientSecret, cfg.RedirectURL,
 		TestAdminEmail, string(hash),
 		TestUserEmail, string(hash),
 	), nil
@@ -81,6 +84,8 @@ spec:
     metadata:
       labels:
         app: dex
+      annotations:
+        checksum/config: "%[3]s"
     spec:
       containers:
         - name: dex
@@ -121,7 +126,8 @@ func indentYAML(s, prefix string) string {
 }
 
 func RenderDexManifests(namespace, configYAML string) string {
-	return fmt.Sprintf(dexManifestsTemplate, namespace, indentYAML(configYAML, "    "))
+	checksum := sha256.Sum256([]byte(configYAML))
+	return fmt.Sprintf(dexManifestsTemplate, namespace, indentYAML(configYAML, "    "), hex.EncodeToString(checksum[:]))
 }
 
 func EnsureDex(ctx context.Context, cfg DexConfig) error {

@@ -26,6 +26,7 @@ func TestRenderDexConfig_ProducesValidYAMLWithWorkingPasswordHash(t *testing.T) 
 		Issuer        string `yaml:"issuer"`
 		StaticClients []struct {
 			ID           string   `yaml:"id"`
+			Name         string   `yaml:"name"`
 			RedirectURIs []string `yaml:"redirectURIs"`
 		} `yaml:"staticClients"`
 		StaticPasswords []struct {
@@ -42,6 +43,9 @@ func TestRenderDexConfig_ProducesValidYAMLWithWorkingPasswordHash(t *testing.T) 
 	}
 	if len(parsed.StaticClients) != 1 || parsed.StaticClients[0].ID != cfg.ClientID {
 		t.Fatalf("expected one static client with id %s, got %+v", cfg.ClientID, parsed.StaticClients)
+	}
+	if parsed.StaticClients[0].Name == "" {
+		t.Fatalf("expected the static client to have a non-empty name (Dex rejects staticClients without one): %+v", parsed.StaticClients[0])
 	}
 	if len(parsed.StaticPasswords) != 2 {
 		t.Fatalf("expected 2 static passwords, got %d", len(parsed.StaticPasswords))
@@ -63,6 +67,50 @@ func TestRenderDexManifests_ProducesValidMultiDocYAML(t *testing.T) {
 			t.Fatalf("invalid yaml document: %v\n%s", err, doc)
 		}
 	}
+}
+
+// Changing the ConfigMap's content alone never restarts a Deployment's
+// existing pods (kubectl apply on an unchanged Deployment spec is a
+// no-op), so a stale Dex config is otherwise silently never picked up
+// by `devcluster up` re-runs. The Deployment's pod template must carry
+// a checksum of the config so a content change forces a new rollout.
+func TestRenderDexManifests_DeploymentChecksumAnnotationChangesWithConfig(t *testing.T) {
+	manifestA := internal.RenderDexManifests("my-ns", "issuer: http://a\n")
+	manifestB := internal.RenderDexManifests("my-ns", "issuer: http://b\n")
+
+	checksumA := dexDeploymentChecksum(t, manifestA)
+	checksumB := dexDeploymentChecksum(t, manifestB)
+
+	if checksumA == "" {
+		t.Fatalf("expected a non-empty checksum/config annotation on the Deployment, got manifest:\n%s", manifestA)
+	}
+	if checksumA == checksumB {
+		t.Fatalf("expected the checksum/config annotation to differ when the rendered config differs, got %q for both", checksumA)
+	}
+}
+
+func dexDeploymentChecksum(t *testing.T, manifests string) string {
+	t.Helper()
+	for _, doc := range splitYAMLDocs(manifests) {
+		var parsed struct {
+			Kind     string `yaml:"kind"`
+			Spec     struct {
+				Template struct {
+					Metadata struct {
+						Annotations map[string]string `yaml:"annotations"`
+					} `yaml:"metadata"`
+				} `yaml:"template"`
+			} `yaml:"spec"`
+		}
+		if err := yaml.Unmarshal([]byte(doc), &parsed); err != nil {
+			t.Fatalf("invalid yaml document: %v\n%s", err, doc)
+		}
+		if parsed.Kind == "Deployment" {
+			return parsed.Spec.Template.Metadata.Annotations["checksum/config"]
+		}
+	}
+	t.Fatalf("no Deployment document found in manifests:\n%s", manifests)
+	return ""
 }
 
 func splitYAMLDocs(s string) []string {

@@ -27,3 +27,13 @@ func WaitForClusterReady(ctx context.Context, namespace, name string) error {
 	}
 	return nil
 }
+
+func runHelmUninstall(ctx context.Context, release, namespace string) error {
+	cmd := exec.CommandContext(ctx, "helm", "uninstall", release, "-n", namespace, "--ignore-not-found")
+	return cmd.Run()
+}
+
+func runKubectlDelete(ctx context.Context, kind, name string) error {
+	cmd := exec.CommandContext(ctx, "kubectl", "delete", kind, name, "--ignore-not-found", "--wait")
+	return cmd.Run()
+}
