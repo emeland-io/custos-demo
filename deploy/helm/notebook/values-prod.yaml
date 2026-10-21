@@ -1,0 +1,5 @@
+replicaCount: 2
+
+postgresql:
+  instances: 3
+  storageSize: 20Gi

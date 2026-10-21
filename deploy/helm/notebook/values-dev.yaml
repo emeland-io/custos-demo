@@ -1,0 +1,8 @@
+replicaCount: 1
+
+image:
+  tag: dev
+
+postgresql:
+  instances: 1
+  storageSize: 2Gi
