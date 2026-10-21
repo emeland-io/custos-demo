@@ -1,0 +1,50 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/example/notebook
+  tag: ""  # defaults to .Chart.AppVersion when empty
+  pullPolicy: IfNotPresent
+
+service:
+  port: 8080
+
+ingress:
+  className: ""      # required — e.g. "nginx"; no default on purpose
+  host: ""            # required — e.g. "notebook.example.com"
+  tls:
+    clusterIssuer: "" # required — e.g. "letsencrypt-prod"
+
+resources: {}
+
+oidc:
+  issuerURL: ""
+  redirectURL: ""
+  adminClaim: "groups"
+  adminClaimValue: "notebook-admin"
+  clientIDSecretRef:
+    name: ""
+    key: "client-id"
+  clientSecretSecretRef:
+    name: ""
+    key: "client-secret"
+
+session:
+  hashKeySecretRef:
+    name: ""
+    key: "hash-key"
+  blockKeySecretRef:
+    name: ""
+    key: "block-key"
+
+postgresql:
+  instances: 1
+  storageSize: 5Gi
+  credentialsSecretRef:
+    name: "" # must contain a "uri" key with a full postgres:// DSN
+    key: "uri"
+  backup:
+    enabled: false
+    # Required when enabled:
+    # destinationPath: "s3://my-bucket/notebook-backups"
+    # endpointURL: "https://s3.example.com"
+    # s3CredentialsSecretRef: {name: "", accessKeyIdKey: "", secretAccessKeyKey: ""}
